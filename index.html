@@ -5569,6 +5569,18 @@ function linkSitoGh(){
   var g = ghImpostazioni();
   return g.user ? "https://" + String(g.user).toLowerCase() + ".github.io/" + GH_REPO + "/" : "";
 }
+/* le tre schede della strada manuale (sito proprio, file da caricare a mano)
+   restano nascoste: con "Pubblica adesso" non servono */
+(function(){
+  var b = document.getElementById("btnManuale");
+  if(b) b.addEventListener("click", function(){
+    var ap = document.querySelector(".card.manuale").hidden;
+    document.querySelectorAll(".card.manuale").forEach(function(c){ c.hidden = !ap; });
+    b.textContent = ap ? "Nascondi la strada manuale" : "Mostra la strada manuale (sito proprio)";
+  });
+  /* l'indirizzo di prova di avvisi.js, rimasto dai test, non deve finire nelle app */
+  if(!CLIENTE && /cementostampato\.it\/app\/avvisi\.js/.test(load(K.avUrl, ""))){ drop(K.avUrl); }
+})();
 function disegnaStatoGh(){
   var g = ghImpostazioni(), st = $("ghStato");
   if(document.activeElement !== $("ghUser")) $("ghUser").value = g.user || "";
