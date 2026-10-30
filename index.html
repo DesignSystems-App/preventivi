@@ -364,7 +364,15 @@ i.due em{flex:1 1 50%; min-width:0}
 .cliente .nm{font-weight:600; font-size:14px; min-width:0; overflow-wrap:anywhere}
 .cliente .dt{grid-column:1/-1; font-size:11.5px; color:var(--muted)}
 .cliente .cd{grid-column:1/-1; font-family:var(--font-mono); font-size:12.5px; letter-spacing:.05em; overflow-wrap:anywhere; color:var(--accent)}
-.cliente .az{display:flex; gap:6px; flex-wrap:wrap}
+.cliente .az{display:flex; gap:4px; flex-wrap:wrap; align-items:center}
+.cliente .az .btn{font-size:11.5px; padding:5px 8px}
+.cliente .az details{flex-basis:100%}
+.cliente .az summary{list-style:none; cursor:pointer; display:inline-block; font-size:11.5px; padding:5px 8px; border:1px solid var(--line-strong); border-radius:var(--r-s); color:var(--muted); user-select:none}
+.cliente .az summary::-webkit-details-marker{display:none}
+.cliente .az details[open] summary{color:var(--fg)}
+.cliente .az .altro{display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; width:100%}
+.cliente{padding:8px 0; grid-template-columns:1fr}
+.cliente .az{grid-column:1/-1}
 .scontigrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px}
 .tabs{display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap}
 .tab{font:inherit; font-size:13px; font-weight:600; background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent; padding:6px 2px; margin-right:10px; cursor:pointer}
@@ -375,6 +383,13 @@ i.due em{flex:1 1 50%; min-width:0}
 @media print{ #firma{border:1px solid #999} .firmariga{display:none!important}
   .topbar,.tabs,.btnrow,.step,.ghost,.schedabtn,.visore{display:none!important} body{background:#fff} .card{border-color:#999; break-inside:avoid} }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* sul telefono le tessere dei colori sono piu’ piccole: tre per riga, quattro per il ghiaino */
+@media (max-width:620px){
+  .colori{grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:12px 8px; padding:10px 8px}
+  .colori .pastiglia span{font-size:9.5px}
+  .colori.piccole{grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:10px 6px}
+  .colori.piccole .pastiglia span{font-size:8.5px}
+}
 </style>
 </head>
 <body>
@@ -826,6 +841,9 @@ var ALLEGATI = (FONTE && FONTE.allegati) || null;
    apre la gestione entrano in memoria come se SER le avesse caricate, e da li'
    in poi si comportano come tutte le altre (si vedono, si tolgono, si
    sostituiscono). Alleggerite prima, perche' la memoria del browser e' poca. */
+/* Le schede ufficiali sul sito cementostampato.it: agganciate per nome,
+   si aprono dal sito e non occupano memoria (ne' nell'app ne' nel listino
+   pubblicato). Una scheda caricata a mano dal gestionale vince su queste. */
 var ALLEGATI_FABBRICA = {};
 
 /* ------------------------------------------------------------------
@@ -899,12 +917,19 @@ function allegatoFabbrica(uid){
   for(var k in ALLEGATI_FABBRICA){
     var e = ALLEGATI_FABBRICA[k];
     if(e.perNome && String(e.perNome).toUpperCase() === nome) return e;
+    if(e.perNomi && e.perNomi.some(function(n){ return String(n).toUpperCase() === nome; })) return e;
   }
   return null;
 }
+/* la scheda caricata a mano su questo dispositivo, se c'e' (senza quelle di fabbrica) */
+function attProprio(uid){
+  if(ATT[uid]) return ATT[uid];
+  try{ return localStorage.getItem(K.att+uid) || null; }catch(e){ return null; }
+}
+function eRemoto(src){ return /^https?:\/\//i.test(String(src||"")); }
 function attGet(uid){
   var fab = allegatoFabbrica(uid);
-  fab = fab ? fab.dati : null;
+  fab = fab ? (fab.dati || fab.url || null) : null;
   if(CLIENTE) return (ALLEGATI && ALLEGATI[uid]) || fab;   // nell'app cliente i PDF arrivano coi dati
   if(ATT[uid]) return ATT[uid];
   try{ return localStorage.getItem(K.att+uid) || fab; }catch(e){ return fab; }
@@ -922,6 +947,7 @@ function attDel(uid){
 function attTutti(){
   var out = {};
   for(var u in ATT) if(ATT.hasOwnProperty(u) && ATT[u]) out[u] = ATT[u];
+  /* le schede sul sito: un indirizzo, non un file */
   try{
     for(var i=0;i<localStorage.length;i++){
       var k = localStorage.key(i);
@@ -2130,7 +2156,12 @@ function pannelloScheda(c){
     h += c.desc ? '<p class="testo">'+esc(c.desc)+'</p>' : '<p class="vuoto">Nessuna descrizione inserita per questo prodotto.</p>';
   }
   h += '<div class="allegato"><h4 style="margin:0;flex:0 0 100%">Scheda tecnica</h4>';
-  if(c.pdf){
+  var srcPdf = c.pdf ? attGet(c.uid) : null;
+  if(c.pdf && eRemoto(srcPdf)){
+    h += '<a class="btn small" style="text-decoration:none;display:inline-block" href="'+esc(srcPdf)+'" target="_blank" rel="noopener noreferrer">Apri scheda tecnica \u2197</a>';
+    h += '<span class="nomefile">'+esc(c.pdf.nome)+' · '+kb(c.pdf.peso)+' · dal sito, in una pagina nuova</span>';
+    if(S.gestione) h += '<button class="btn sec small" type="button" data-pdfdel="'+esc(c.uid)+'">Rimuovi</button>';
+  } else if(c.pdf){
     h += '<button class="btn small" type="button" data-apri="'+esc(c.uid)+'">'+(S.visore===c.uid?"Chiudi":"Apri")+' scheda tecnica</button>';
     h += '<span class="nomefile">'+esc(c.pdf.nome)+' · '+kb(c.pdf.peso)+'</span>';
     if(S.gestione) h += '<button class="btn sec small" type="button" data-pdfdel="'+esc(c.uid)+'">Rimuovi</button>';
@@ -2162,8 +2193,8 @@ function pannelloScheda(c){
     h += '<div style="margin-top:10px"><a class="btn sec small" style="text-decoration:none;display:inline-block" href="'+esc(c.link)+'" target="_blank" rel="noopener noreferrer">Vedi sul sito del produttore ↗</a>'
        + '<p class="hint" style="margin-top:6px">Si apre fuori dall’app, in una pagina nuova.</p></div>';
   }
-  if(S.visore===c.uid && c.pdf){
-    var src = attGet(c.uid);
+  if(S.visore===c.uid && c.pdf && !eRemoto(srcPdf)){
+    var src = srcPdf;
     if(src){
       h += '<div class="visore"><iframe title="Scheda tecnica di '+esc(c.nome)+'" src="'+esc(src)+'"></iframe></div>';
       h += '<div class="btnrow"><button class="btn sec small" type="button" data-nuova="'+esc(c.uid)+'">Apri in una finestra nuova</button></div>';
@@ -3188,6 +3219,7 @@ $("righe").addEventListener("click", function(e){
   }
   if((t = e.target.closest("[data-nuova]"))){
     var src = attGet(t.getAttribute("data-nuova"));
+    if(src && eRemoto(src)){ window.open(src, "_blank", "noopener"); return; }
     if(src){
       try{
         var w = window.open();
@@ -4576,18 +4608,20 @@ function disegnaClienti(){
     return '<div class="cliente">'
       + '<span class="nm">'+esc(c.nome || "(senza nome)")+'</span>'
       + '<span class="az">'
-        + '<button class="btn sec small" type="button" data-clicopia="'+esc(c.id)+'">Copia codice</button>'
-        + '<button class="btn sec small" type="button" data-cliusa="'+esc(c.id)+'">Usa i suoi sconti</button>'
-        + '<button class="btn sec small" type="button" data-cliapp="'+esc(c.id)+'">Genera la sua app</button>'
         + '<button class="btn sec small" type="button" data-clilink="'+esc(c.id)+'">Link su WhatsApp</button>'
         + '<button class="btn sec small" type="button" data-clicopialink="'+esc(c.id)+'">Copia il link</button>'
-        + '<button class="btn sec small" type="button" data-cliwa="'+esc(c.id)+'">Manda l\u2019app su WhatsApp</button>'
-        + '<button class="btn sec small" type="button" data-climail="'+esc(c.id)+'">Manda l\u2019app per email</button>'
-        + (navigator.share && navigator.canShare ? '<button class="btn sec small" type="button" data-clishare="'+esc(c.id)+'">Condividi\u2026</button>' : '')
         + '<button class="btn sec small" type="button" data-cliprezzi="'+esc(c.id)+'">Prezzi suoi</button>'
         + '<button class="btn sec small" type="button" data-climod="'+esc(c.id)+'">Modifica</button>'
-        + '<button class="btn sec small" type="button" data-cliriusa="'+esc(c.id)+'">Riusa per un altro</button>'
-        + '<button class="btn sec small" type="button" data-clidel="'+esc(c.id)+'">Elimina</button>'
+        + '<details><summary>Altro \u25be</summary><span class="altro">'
+          + '<button class="btn sec small" type="button" data-cliusa="'+esc(c.id)+'">Usa i suoi sconti</button>'
+          + '<button class="btn sec small" type="button" data-clicopia="'+esc(c.id)+'">Copia codice</button>'
+          + '<button class="btn sec small" type="button" data-cliriusa="'+esc(c.id)+'">Riusa per un altro</button>'
+          + '<button class="btn sec small" type="button" data-cliapp="'+esc(c.id)+'">Genera la sua app (file)</button>'
+          + '<button class="btn sec small" type="button" data-cliwa="'+esc(c.id)+'">File su WhatsApp</button>'
+          + '<button class="btn sec small" type="button" data-climail="'+esc(c.id)+'">File per email</button>'
+          + (navigator.share && navigator.canShare ? '<button class="btn sec small" type="button" data-clishare="'+esc(c.id)+'">Condividi\u2026</button>' : '')
+          + '<button class="btn sec small" type="button" data-clidel="'+esc(c.id)+'">Elimina</button>'
+        + '</span></details>'
       + '</span>'
       + '<span class="dt">sconto base '+N(c.base)+'%'+(n ? " \u00b7 "+n+" eccezion"+(n>1?"i":"e") : "")
         + (np ? " \u00b7 "+np+" prodott"+(np>1?"i":"o")+" a prezzo suo" : "")
@@ -5473,14 +5507,17 @@ function agganciaSchedeDiFabbrica(){
     var ef = ALLEGATI_FABBRICA[chiave];
     var bersagli = [];
     scorriVoci(listinoGenerale(), function(c){
-      if(ef.perNome){ if(String(c.nome||"").trim().toUpperCase() === String(ef.perNome).toUpperCase()) bersagli.push(c); }
+      var nm = String(c.nome||"").trim().toUpperCase();
+      if(ef.perNome){ if(nm === String(ef.perNome).toUpperCase()) bersagli.push(c); }
+      else if(ef.perNomi){ if(ef.perNomi.some(function(n){ return String(n).toUpperCase() === nm; })) bersagli.push(c); }
       else if(c.uid === chiave) bersagli.push(c);
     });
     bersagli.forEach(function(vaf){
       var segno = chiave + "@" + vaf.uid;
-      if(giaMessi.indexOf(segno) >= 0 || giaMessi.indexOf(chiave) >= 0 && !ef.perNome) return;
-      if(!vaf.pdf){
-        attSet(vaf.uid, ef.dati);
+      if(giaMessi.indexOf(segno) >= 0 || giaMessi.indexOf(chiave) >= 0 && !ef.perNome && !ef.perNomi) return;
+      /* senza scheda, o con una scheda di cui il file non c'e' piu': arriva quella di fabbrica */
+      if(!vaf.pdf || !attProprio(vaf.uid)){
+        attSet(vaf.uid, ef.dati || ef.url);
         vaf.pdf = {nome:ef.nome, peso:ef.peso};
         agganciati++;
       }
