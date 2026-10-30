@@ -2912,13 +2912,14 @@ function disegnaTotali(r){
   var h = '<div class="tline"><span>Materiale a listino</span><span>'+E(r.lordo)+'</span></div>';
   if(cliente){
     h += '<div class="tline sconto"><span>'+etichettaSconto(r)+'</span><span>−'+E(r.scontoEur)+'</span></div>';
-    h += '<div class="tline big"><span>Totale</span><span>'+E(r.netto)+'</span></div>';
+    h += '<div class="tline"><span>Imponibile</span><span>'+E(r.netto)+'</span></div>';
   } else {
-    h += '<div class="tline big"><span>Totale a listino</span><span>'+E(r.lordo)+'</span></div>';
+    h += '<div class="tline"><span>Imponibile a listino</span><span>'+E(r.lordo)+'</span></div>';
   }
-  h += '<div class="tmeta"><span>'+(r.mq>0 ? "≈ <b>"+E(r.nettoMq)+"</b>/m² su <b>"+N(r.mq)+"</b> m²" : "inserisci i metri quadri")+'</span>'
+  h += '<div class="tline"><span>IVA 22%</span><span>'+E(r.iva)+'</span></div>';
+  h += '<div class="tline big"><span>Totale IVA inclusa</span><span>'+E(r.netto+r.iva)+'</span></div>';
+  h += '<div class="tmeta"><span>'+(r.mq>0 ? "≈ <b>"+E(r.nettoMq)+"</b>/m² su <b>"+N(r.mq)+"</b> m² (imponibile)" : "inserisci i metri quadri")+'</span>'
      + '<span>'+(r.sc>0 ? "sfrido +<b>"+N(r.sc)+"</b>%" : "senza sfrido")+'</span></div>';
-  h += '<div class="tmeta"><span>IVA 22% '+E(r.iva)+'</span><span>con IVA <b>'+E(r.netto+r.iva)+'</b></span></div>';
   if(r.senzaPrezzo>0) h += '<div class="tmeta" style="color:var(--signal)"><span>'
     + (r.senzaPrezzo>1 ? r.senzaPrezzo+' voci senza prezzo o senza formato confezione: non conteggiate'
                        : 'Una voce senza prezzo o senza formato confezione: non conteggiata')
@@ -4243,10 +4244,11 @@ function disegnaRiepilogo(r){
   h += '<div class="fine">';
   h += '<div class="tline"><span>Materiale a listino</span><span>'+E(r.lordo)+'</span></div>';
   if(cliente) h += '<div class="tline sconto"><span>'+etichettaSconto(r)+'</span><span>\u2212'+E(r.scontoEur)+'</span></div>';
-  h += '<div class="tline big"><span>'+(cliente?"Totale":"Totale a listino")+'</span><span>'+E(r.netto)+'</span></div>';
-  h += '<div class="tmeta"><span>'+(r.mq>0 ? "\u2248 <b>"+E(r.nettoMq)+"</b>/m\u00b2" : "")+'</span>'
-     + '<span>IVA 22% '+E(r.iva)+' \u00b7 con IVA <b>'+E(r.netto+r.iva)+'</b></span></div>';
-  h += '<div class="tmeta"><span>IVA, imballo e trasporto esclusi</span></div>';
+  h += '<div class="tline"><span>'+(cliente?"Imponibile":"Imponibile a listino")+'</span><span>'+E(r.netto)+'</span></div>';
+  h += '<div class="tline"><span>IVA 22%</span><span>'+E(r.iva)+'</span></div>';
+  h += '<div class="tline big"><span>Totale IVA inclusa</span><span>'+E(r.netto+r.iva)+'</span></div>';
+  h += '<div class="tmeta"><span>'+(r.mq>0 ? "\u2248 <b>"+E(r.nettoMq)+"</b>/m\u00b2 imponibile" : "")+'</span>'
+     + '<span>imballo e trasporto esclusi</span></div>';
   h += '</div>';
   $("riepBox").innerHTML = h;
   aggiornaInvii(r);
@@ -4294,11 +4296,12 @@ function testoRiepilogo(){
   if(cliente){
     L.push((r.misto ? "Sconto riservato (media "+N(Math.round(r.pct*100)/100)+"%): -"
                     : "Sconto riservato -"+N(Math.round(r.pct*100)/100)+"%: -")+E(r.scontoEur));
-    L.push((ordine ? "TOTALE ORDINE: " : "TOTALE: ")+E(r.netto));
   }
-  if(r.mq>0) L.push("circa "+E(r.nettoMq)+"/m\u00b2");
-  L.push("IVA 22% "+E(r.iva)+" \u2014 con IVA "+E(r.netto+r.iva));
-  L.push("IVA, imballo e trasporto esclusi.");
+  L.push("Imponibile: "+E(r.netto));
+  L.push("IVA 22%: "+E(r.iva));
+  L.push((ordine ? "*TOTALE ORDINE IVA INCLUSA: " : "*TOTALE IVA INCLUSA: ")+E(r.netto+r.iva)+"*");
+  if(r.mq>0) L.push("circa "+E(r.nettoMq)+"/m\u00b2 imponibile");
+  L.push("Imballo e trasporto esclusi.");
   if(conferma){ L.push(""); L.push(conferma); }
   return L.join("\n");
 }
