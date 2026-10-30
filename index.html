@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#d9c094">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Preventivi">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Preventivi Pavimenti</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -231,6 +234,12 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .soloprezzi .editgrid button, .soloprezzi .editgrid label.filepick, .soloprezzi .editgrid .btnrow{display:none}
 .soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz]{
   border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
+.installa{border-color:var(--accent); background:var(--accent-soft)}
+.privacybox{margin-top:14px; padding:12px; background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--r); font-size:13px}
+.privacybox label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer}
+.privacybox input[type=checkbox]{width:20px; height:20px; flex:0 0 auto; margin-top:1px; accent-color:var(--accent)}
+.privacybox details{margin-top:8px; font-size:12px; color:var(--muted)}
+.privacybox summary{cursor:pointer; color:var(--fg)}
 .fotosis{margin-top:12px; border-radius:var(--r); overflow:hidden; border:1px solid var(--line-strong); background:var(--surface-2)}
 .fotosis img{display:block; width:100%; height:220px; object-fit:cover}
 .rcolore{display:flex; align-items:center; gap:6px; margin-top:5px; font-size:11.5px; letter-spacing:.04em;
@@ -503,6 +512,16 @@ i.due em{flex:1 1 50%; min-width:0}
               <textarea id="noteOrd" rows="2" placeholder="il cantiere dove serve il materiale, quando serve, chi ritira, altre indicazioni"></textarea></div>
             <div class="riep" id="riepBox"></div>
 
+            <!-- privacy: prima di mandare i suoi dati il cliente acconsente -->
+            <div class="privacybox" id="privacyBox">
+              <label class="chk" for="privacyOk"><input type="checkbox" id="privacyOk">
+                <span>Ho letto l&rsquo;informativa sulla privacy e acconsento al trattamento dei miei dati (nome, telefono, email, note dell&rsquo;ordine) per la gestione del preventivo e dell&rsquo;ordine. <span id="oblPrivacy" class="obbl">&mdash; obbligatorio</span></span></label>
+              <details><summary>Leggi l&rsquo;informativa</summary>
+                <p id="privacyTesto" style="margin:6px 0 0"></p>
+              </details>
+              <p class="hint" id="privacyStato" style="margin:6px 0 0"></p>
+            </div>
+
             <!-- firma: l'ordine parte solo dopo che il cliente ha firmato, col dito o col mouse -->
             <div class="firmabox">
               <label class="l" for="firma">Firma per conferma dell&rsquo;ordine <span id="oblFirma"></span></label>
@@ -528,6 +547,21 @@ i.due em{flex:1 1 50%; min-width:0}
   </section>
 
   
+  <!-- SOLO-ONLINE: il link personale chiede il numero di chi lo apre -->
+  <div class="card installa" id="confermaBox" hidden>
+    <h3 style="margin:0 0 4px">Questo link è personale</h3>
+    <p class="corpo" style="margin:0 0 8px">Per attivare il tuo listino scrivi il numero di cellulare a cui è stato mandato.</p>
+    <div class="btnrow"><input id="confermaTel" type="tel" inputmode="tel" placeholder="333 1234567" style="flex:1 1 160px">
+      <button class="btn small" type="button" id="btnConfermaTel">Attiva</button></div>
+    <p class="msg" id="confermaMsg"></p>
+  </div>
+  <!-- SOLO-ONLINE: invito a mettere l'app sulla schermata Home -->
+  <div class="card installa" id="installaBox" hidden>
+    <h3 style="margin:0 0 4px">Mettila sul telefono</h3>
+    <p class="corpo" id="installaTesto" style="margin:0 0 8px"></p>
+    <div class="btnrow"><button class="btn small" type="button" id="btnInstalla" hidden>Aggiungi alla schermata Home</button>
+      <button class="btn sec small" type="button" id="btnInstallaNo">Più tardi</button></div>
+  </div>
   
 
   <!-- Formato della copia di sicurezza (pavpro-dati, versione 2):
@@ -559,6 +593,13 @@ var SORGENTE = "online";
 var TEMPLATE_B64 = ""; /*__TEMPLATE__*/
 var ONLINE_B64 = ""; /*__ONLINE__*/      // l'index.html per il sito, pronto da pubblicare
 var GH_PRECOMPILATO = null; /*__GHPRE__*/   // {user, token} messi da Claude in una copia locale, una volta sola
+var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
+var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
+  display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
+  icons:[{src:"icon-192.png", sizes:"192x192", type:"image/png"}, {src:"icon-512.png", sizes:"512x512", type:"image/png", purpose:"any maskable"}] };
+/* nessun start_url: l'app parte dall'indirizzo con cui e' stata messa sulla
+   schermata Home, cioe' col link personale del cliente dentro */
+var SW_APP = "self.addEventListener('install',function(e){self.skipWaiting()});self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim())});self.addEventListener('fetch',function(e){});";
 var CLIENTE = (RUOLO === "cliente");
 
 /* ============================================================
@@ -826,13 +867,17 @@ if(CLIENTE && SORGENTE === "online"){
       hh.split("&").forEach(function(kv){ var k = kv.split("="); qq[decodeURIComponent(k[0])] = decodeURIComponent((k.slice(1).join("=")||"").replace(/\+/g, " ")); });
       var vociLink = null;
       if(qq.p){ try{ vociLink = JSON.parse(testoDaBase64Url(qq.p)); }catch(e){ vociLink = null; } }
-      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString()};
-      save(K.link, LINK_CLI);
-      try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||""};
+      /* legato a un numero: finche' il numero non e' confermato, il link non attiva niente */
+      var giaOk = load(K.link, null);
+      if(LINK_CLI.t && !(giaOk && giaOk.t === LINK_CLI.t && giaOk.ok)) LINK_CLI.daConfermare = true;
+      else if(giaOk && giaOk.t === LINK_CLI.t && giaOk.ok) LINK_CLI.ok = true;
+      save(K.link, LINK_CLI);          // e resta anche nell'indirizzo: la schermata Home lo riusa
     }
   }catch(e){ LINK_CLI = null; }
   if(!LINK_CLI) LINK_CLI = load(K.link, null);
-  if(LINK_CLI && LINK_CLI.code && DATI) DATI.cliente = {nome:LINK_CLI.nome||"", code:LINK_CLI.code};
+  if(LINK_CLI && LINK_CLI.daConfermare){ /* il listino parte solo dopo la conferma del numero */ }
+  else if(LINK_CLI && LINK_CLI.code && DATI) DATI.cliente = {nome:LINK_CLI.nome||"", code:LINK_CLI.code};
   /* un link personale toccato mentre l'app e' gia' aperta: si riparte */
   window.addEventListener("hashchange", function(){ if(/(^|[#&])c=/.test(location.hash)) location.reload(); });
 }
@@ -841,9 +886,10 @@ var ALLEGATI = (FONTE && FONTE.allegati) || null;
    apre la gestione entrano in memoria come se SER le avesse caricate, e da li'
    in poi si comportano come tutte le altre (si vedono, si tolgono, si
    sostituiscono). Alleggerite prima, perche' la memoria del browser e' poca. */
-/* Le schede ufficiali sul sito cementostampato.it: agganciate per nome,
-   si aprono dal sito e non occupano memoria (ne' nell'app ne' nel listino
-   pubblicato). Una scheda caricata a mano dal gestionale vince su queste. */
+/* Le schede ufficiali stanno nella cartella schede/ del sito dell'app
+   (GitHub Pages) e si vedono dentro l'app: agganciate per nome, pesano
+   zero nel gestionale e nel listino pubblicato. Una scheda caricata a mano
+   dal gestionale vince su queste, e "Pubblica adesso" la mette sul sito. */
 var ALLEGATI_FABBRICA = {};
 
 /* ------------------------------------------------------------------
@@ -926,10 +972,20 @@ function attProprio(uid){
   if(ATT[uid]) return ATT[uid];
   try{ return localStorage.getItem(K.att+uid) || null; }catch(e){ return null; }
 }
-function eRemoto(src){ return /^https?:\/\//i.test(String(src||"")); }
+function eRemoto(src){ return false; }   // le schede sul sito dell'app si vedono dentro l'app
+/* un allegato puo' essere un data: (file dentro la memoria) o un percorso
+   "schede/x.pdf" sul sito dell'app: qui diventa l'indirizzo da aprire */
+function urlAllegato(v){
+  v = String(v || "");
+  if(!v) return "";
+  if(/^data:/i.test(v) || /^https?:\/\//i.test(v)) return v;
+  if(SORGENTE === "online") return v;                 // stessa cartella del sito
+  var b = cartellaSito();
+  return b ? b + v : "";                                // dal Mac o dal file: serve l'indirizzo del sito
+}
 function attGet(uid){
   var fab = allegatoFabbrica(uid);
-  fab = fab ? (fab.dati || fab.url || null) : null;
+  fab = fab ? (fab.dati || fab.file || null) : null;
   if(CLIENTE) return (ALLEGATI && ALLEGATI[uid]) || fab;   // nell'app cliente i PDF arrivano coi dati
   if(ATT[uid]) return ATT[uid];
   try{ return localStorage.getItem(K.att+uid) || fab; }catch(e){ return fab; }
@@ -988,7 +1044,7 @@ var listino, fusoDa = null, migrato = false;
 if(CLIENTE && FONTE && FONTE.listino){
   listino = FONTE.listino;
   /* i prezzi arrivati col link personale, sopra al listino del sito */
-  if(LINK_CLI && LINK_CLI.voci) listino = applicaVociCliente(listino, clone(LINK_CLI.voci));
+  if(LINK_CLI && LINK_CLI.voci && !LINK_CLI.daConfermare) listino = applicaVociCliente(listino, clone(LINK_CLI.voci));
 } else {
   var mod = load(K.mod, null) || load(K.modBak, null);
   if(!mod){
@@ -1057,6 +1113,7 @@ var S = {
   cons: (sel.cons && typeof sel.cons==="object") ? sel.cons : {},    // uid -> consumo scelto
   incluso: (sel.incluso && typeof sel.incluso==="object") ? sel.incluso : {},  // uid -> spunta "mi serve"
   rif: sel.rif || "", wa: sel.wa || "", mail: sel.mail || "", note: sel.note || "",
+  privacy: (sel.privacy && sel.privacy.quando) ? sel.privacy : null,   // {quando} consenso privacy
   modo: "ordine",   // l'app fa ordini, non preventivi
   pz: {}
 };
@@ -1082,17 +1139,29 @@ var S = {
 
 function salvaSel(){ save(K.sel, {gruppo:S.gruppo, variante:S.variante, mq:S.mq, scarto:S.scarto,
   colore:S.colore, colsel:S.colsel, colq:S.colq, stencil:S.stencil, granulo:S.granulo, incluso:S.incluso, conf:S.conf, cons:S.cons, fin:S.fin, colgr:S.colgr, colpct:S.colpct,
-  rif:S.rif, wa:S.wa, mail:S.mail, note:S.note, modo:S.modo}); }
+  rif:S.rif, wa:S.wa, mail:S.mail, note:S.note, modo:S.modo, privacy:S.privacy||null}); }
 
 /* i recapiti dell'azienda: in gestione si impostano, nell'app cliente arrivano coi dati.
    I valori di fabbrica sono quelli veri, cosi un'app generata funziona anche
    se nessuno e passato dalla scheda dei recapiti. */
-var AZIENDA_FABBRICA = { nome:"Design Systems Srl", wa:"+39 393 119 2968", mail:"info@designsystems.it" };
+var AZIENDA_FABBRICA = { nome:"Design Systems Srl", wa:"+39 393 119 2968", mail:"info@designsystems.it",
+                         privacyUrl:"https://www.iubenda.com/privacy-policy/30602722" };
 function completaAzienda(a){
   a = a || {};
   return { nome: a.nome || AZIENDA_FABBRICA.nome,
            wa:   a.wa   || AZIENDA_FABBRICA.wa,
-           mail: a.mail || AZIENDA_FABBRICA.mail };
+           mail: a.mail || AZIENDA_FABBRICA.mail,
+           privacyUrl: a.privacyUrl || AZIENDA_FABBRICA.privacyUrl || "" };
+}
+function testoInformativa(){
+  var az = AZIENDA || {};
+  return "Titolare del trattamento: " + (az.nome || "Design Systems Srl") + (az.mail ? " (" + az.mail + ")" : "") + ". "
+    + "I dati che scrivi qui (nome o cantiere, numero WhatsApp, email, note e firma) servono solo a preparare il preventivo, "
+    + "ricevere e gestire l\u2019ordine e ricontattarti per questo. Vengono inviati al titolare col messaggio che parte da qui "
+    + "(WhatsApp o email) e conservati per il tempo necessario alla gestione dell\u2019ordine e agli obblighi di legge. "
+    + "Non vengono ceduti a terzi per fini commerciali. Puoi chiedere in ogni momento di vederli, correggerli o cancellarli "
+    + "scrivendo al titolare. Base giuridica: esecuzione di misure precontrattuali e contrattuali su tua richiesta (art. 6.1.b GDPR)."
+    + (az.privacyUrl ? " Informativa completa: " + az.privacyUrl : "");
 }
 var AZIENDA = completaAzienda((CLIENTE && DATI && DATI.azienda) ? DATI.azienda : load(K.azienda, null));
 
@@ -2156,12 +2225,8 @@ function pannelloScheda(c){
     h += c.desc ? '<p class="testo">'+esc(c.desc)+'</p>' : '<p class="vuoto">Nessuna descrizione inserita per questo prodotto.</p>';
   }
   h += '<div class="allegato"><h4 style="margin:0;flex:0 0 100%">Scheda tecnica</h4>';
-  var srcPdf = c.pdf ? attGet(c.uid) : null;
-  if(c.pdf && eRemoto(srcPdf)){
-    h += '<a class="btn small" style="text-decoration:none;display:inline-block" href="'+esc(srcPdf)+'" target="_blank" rel="noopener noreferrer">Apri scheda tecnica \u2197</a>';
-    h += '<span class="nomefile">'+esc(c.pdf.nome)+' · '+kb(c.pdf.peso)+' · dal sito, in una pagina nuova</span>';
-    if(S.gestione) h += '<button class="btn sec small" type="button" data-pdfdel="'+esc(c.uid)+'">Rimuovi</button>';
-  } else if(c.pdf){
+  var srcPdf = c.pdf ? urlAllegato(attGet(c.uid)) : null;
+  if(c.pdf){
     h += '<button class="btn small" type="button" data-apri="'+esc(c.uid)+'">'+(S.visore===c.uid?"Chiudi":"Apri")+' scheda tecnica</button>';
     h += '<span class="nomefile">'+esc(c.pdf.nome)+' · '+kb(c.pdf.peso)+'</span>';
     if(S.gestione) h += '<button class="btn sec small" type="button" data-pdfdel="'+esc(c.uid)+'">Rimuovi</button>';
@@ -2193,13 +2258,15 @@ function pannelloScheda(c){
     h += '<div style="margin-top:10px"><a class="btn sec small" style="text-decoration:none;display:inline-block" href="'+esc(c.link)+'" target="_blank" rel="noopener noreferrer">Vedi sul sito del produttore ↗</a>'
        + '<p class="hint" style="margin-top:6px">Si apre fuori dall’app, in una pagina nuova.</p></div>';
   }
-  if(S.visore===c.uid && c.pdf && !eRemoto(srcPdf)){
+  if(S.visore===c.uid && c.pdf){
     var src = srcPdf;
     if(src){
       h += '<div class="visore"><iframe title="Scheda tecnica di '+esc(c.nome)+'" src="'+esc(src)+'"></iframe></div>';
       h += '<div class="btnrow"><button class="btn sec small" type="button" data-nuova="'+esc(c.uid)+'">Apri in una finestra nuova</button></div>';
+    } else if(attGet(c.uid) && !cartellaSito()){
+      h += '<p class="msg err">Questa scheda sta sul sito dell\u2019app: ' + (S.gestione ? 'premi Pubblica adesso in Comunicazioni, poi si vede anche qui.' : 'serve una copia dell\u2019app generata dopo la pubblicazione.') + '</p>';
     } else {
-      h += '<p class="msg err">Il file non si trova più nella memoria di questo dispositivo.</p>';
+      h += '<p class="msg err">Il file non si trova pi\u00f9 nella memoria di questo dispositivo.</p>';
     }
   }
   h += '</div>';
@@ -2933,8 +3000,8 @@ $("mq").addEventListener("input", function(e){ S.mq = Number(e.target.value); sa
 $("scarto").addEventListener("input", function(e){ S.scarto = Number(e.target.value); salvaSel(); disegna(); });
 $("mq").value = S.mq; $("scarto").value = S.scarto;
 $("rifCliente").value = S.rif; $("waNum").value = S.wa; $("mailDest").value = S.mail; $("noteOrd").value = S.note;
-["azNome","azWa","azMail"].forEach(function(id, k){
-  var campo = ["nome","wa","mail"][k], el = $(id);
+["azNome","azWa","azMail","azPrivacy"].forEach(function(id, k){
+  var campo = ["nome","wa","mail","privacyUrl"][k], el = $(id);
   el.value = AZIENDA[campo] || "";
   if(!CLIENTE) save(K.azienda, AZIENDA);
   el.addEventListener("input", function(e){
@@ -2947,6 +3014,17 @@ $("rifCliente").value = S.rif; $("waNum").value = S.wa; $("mailDest").value = S.
   });
 });
 $("rifCliente").addEventListener("input", function(e){ S.rif = e.target.value; salvaSel(); disegnaRiepilogo(calcola()); });
+$("privacyOk").addEventListener("change", function(e){
+  S.privacy = e.target.checked ? {quando:new Date().toISOString()} : null;
+  salvaSel(); aggiornaInvii(calcola());
+});
+function disegnaPrivacy(){
+  var ok = !!(S.privacy && S.privacy.quando);
+  if($("privacyOk").checked !== ok) $("privacyOk").checked = ok;
+  $("privacyTesto").textContent = testoInformativa();
+  $("privacyStato").textContent = ok ? ("Consenso dato il " + new Date(S.privacy.quando).toLocaleDateString("it-IT") + ". Togli la spunta per revocarlo.") : "";
+  $("oblPrivacy").hidden = ok;
+}
 $("noteOrd").addEventListener("input", function(e){ S.note = e.target.value; salvaSel(); disegnaRiepilogo(calcola()); });
 $("waNum").addEventListener("input", function(e){ S.wa = e.target.value; salvaSel(); aggiornaInvii(calcola()); });
 $("mailDest").addEventListener("input", function(e){ S.mail = e.target.value; salvaSel(); aggiornaInvii(calcola()); });
@@ -3218,8 +3296,8 @@ $("righe").addEventListener("click", function(e){
     disegna(); return;
   }
   if((t = e.target.closest("[data-nuova]"))){
-    var src = attGet(t.getAttribute("data-nuova"));
-    if(src && eRemoto(src)){ window.open(src, "_blank", "noopener"); return; }
+    var src = urlAllegato(attGet(t.getAttribute("data-nuova")));
+    if(src && !/^data:/i.test(src)){ window.open(src, "_blank", "noopener"); return; }
     if(src){
       try{
         var w = window.open();
@@ -3802,10 +3880,18 @@ function testoConsegnaApp(cli){
 }
 /* il link personale del cliente all'app sul sito: codice, nome e prezzi suoi
    stanno dopo il #, che resta sul telefono e non va al server */
+/* il numero del cliente non viaggia nel link: ci va una sua impronta, e chi
+   apre il link deve scrivere il numero giusto per attivare il listino */
+function improntaNumero(tel, code){
+  var n = numeroWaCliente(tel);
+  return n ? firmaDati("tel:" + n + ":" + String(code||"")) : "";
+}
 function linkCliente(cli){
   var base = load(K.base, "");
   if(!/^https?:\/\//i.test(base)) return null;
   var url = base.replace(/\/+$/, "") + "/#c=" + encodeURIComponent(cli.code||"") + "&n=" + encodeURIComponent(cli.nome||"") + "&i=" + encodeURIComponent(cli.id||"");
+  var imp = improntaNumero(cli.tel, cli.code);
+  if(imp) url += "&t=" + imp;
   var voci = migraVociCliente(clone(cli.voci || {}));
   if(voci && Object.keys(voci).length) url += "&p=" + base64UrlDaTesto(JSON.stringify(voci));
   return url;
@@ -3909,7 +3995,7 @@ $("fileImport").addEventListener("change", function(e){
       if(Array.isArray(p.avvisi)){ avvisi = p.avvisi; save(K.avvisi, avvisi); aggiornaCampanella(); }
       if(p.azienda && typeof p.azienda === "object"){
         AZIENDA = p.azienda; save(K.azienda, AZIENDA);
-        ["azNome","azWa","azMail"].forEach(function(id,k){ $(id).value = AZIENDA[["nome","wa","mail"][k]] || ""; });
+        ["azNome","azWa","azMail","azPrivacy"].forEach(function(id,k){ $(id).value = AZIENDA[["nome","wa","mail","privacyUrl"][k]] || ""; });
       }
       if(p.impostazioni && typeof p.impostazioni === "object"){
         if(typeof p.impostazioni.cartellaSito === "string"){ save(K.base, p.impostazioni.cartellaSito); $("sitoBase").value = p.impostazioni.cartellaSito; }
@@ -4177,6 +4263,7 @@ function testoRiepilogo(){
     if(S.mail) L.push("  email: " + S.mail);
     if(S.wa)   L.push("  whatsapp: " + S.wa);
     if(cliente && cliente.code) L.push("  codice sconto: " + cliente.code);
+    if(S.privacy && S.privacy.quando) L.push("  privacy: consenso dato il " + new Date(S.privacy.quando).toLocaleDateString("it-IT") + " alle " + new Date(S.privacy.quando).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}));
     L.push("");
   } else if(S.rif){
     L.push(S.rif);
@@ -4224,6 +4311,7 @@ function numeroWa(v){
 function mancanzeOrdine(){
   var m = [];
   if(!String(S.rif||"").trim()) m.push("il nome del cliente");
+  if(!(S.privacy && S.privacy.quando)) m.push("il consenso privacy");
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(S.mail||"").trim())) m.push("un'email valida");
   if(!numeroWa(S.wa)) m.push("il numero WhatsApp col prefisso");
   if(!firmaFatta) m.push("la firma di conferma");
@@ -4239,6 +4327,7 @@ function aggiornaInvii(r){
   ["oblRif","oblWa","oblMail","oblFirma"].forEach(function(id){
     var el = $(id); el.className = "obbl"; el.textContent = "\u2014 obbligatorio";
   });
+  disegnaPrivacy();
   var fs = $("firmaStato");
   if(firmaFatta){
     fs.className = "hint"; fs.style.color = "var(--ok)";
@@ -5210,11 +5299,14 @@ function ghErrore(r, cosa){
   if(r.stato === 403 && /scope|permission|Resource not accessible/i.test(msg)) msg = "la chiave non ha il permesso \u00abrepo\u00bb: creane una nuova con la casella repo spuntata";
   return new Error(cosa + ": " + msg);
 }
-function ghMettiFile(user, token, nome, testo, messaggio){
+function ghMettiFileB64(user, token, nome, b64, messaggio){
+  return ghMettiFile(user, token, nome, null, messaggio, b64);
+}
+function ghMettiFile(user, token, nome, testo, messaggio, giaB64){
   var via = "/repos/" + user + "/" + GH_REPO + "/contents/" + nome;
   return ghChiama("GET", via, null, token).then(function(r){
     var sha = (r.ok && r.dati && r.dati.sha) ? r.dati.sha : null;
-    var corpo = { message: messaggio, content: base64DaTesto(testo) };
+    var corpo = { message: messaggio, content: giaB64 || base64DaTesto(testo) };
     if(sha) corpo.sha = sha;
     return ghChiama("PUT", via, corpo, token);
   }).then(function(r){ if(!r.ok) throw ghErrore(r, "non riesco a caricare " + nome); return r; });
@@ -5263,13 +5355,42 @@ function pubblicaSuGh(){
     passo("Carico l\u2019app (index.html)\u2026");
     return ghMettiFile(login, token, "index.html", indexHtml, "App Preventivi Pavimenti");
   }).then(function(){
-    passo("Carico il listino (dati.json, " + kb(testoDati.length) + ")\u2026");
-    return ghMettiFile(login, token, "dati.json", testoDati, "Listino aggiornato");
-  }).then(function(){
     passo("Carico gli avvisi\u2026");
     return ghMettiFile(login, token, "avvisi.json", testoAvvisi, "Avvisi aggiornati");
   }).then(function(){
     return ghMettiFile(login, token, ".nojekyll", "\n", "Pagine servite cos\u00ec come sono");
+  }).then(function(){
+    passo("Carico icona e manifesto dell\u2019app\u2026");
+    var g2 = ghImpostazioni(); if(g2.iconeFatte) return null;
+    return ghMettiFile(login, token, "manifest.json", JSON.stringify(MANIFEST_APP), "Manifesto dell\u2019app")
+      .then(function(){ return ghMettiFile(login, token, "sw.js", SW_APP, "Service worker"); })
+      .then(function(){ return ICONE_B64["192"] ? ghMettiFileB64(login, token, "icon-192.png", ICONE_B64["192"], "Icona 192") : null; })
+      .then(function(){ return ICONE_B64["512"] ? ghMettiFileB64(login, token, "icon-512.png", ICONE_B64["512"], "Icona 512") : null; })
+      .then(function(){ var g3 = ghImpostazioni(); g3.iconeFatte = true; save(K.gh, g3); });
+  }).then(function(){
+    /* le schede caricate a mano (data:) vanno sul sito come file: il listino
+       pubblicato porta solo il percorso e resta leggero */
+    var g4 = ghImpostazioni(); g4.schede = g4.schede || {};
+    var daFare = [];
+    for(var ua in dati.allegati){
+      var va = String(dati.allegati[ua] || "");
+      if(!/^data:/i.test(va)) continue;
+      var firma = ua + ":" + va.length + ":" + firmaDati(va.slice(-4000));
+      var nomeF = "schede/u-" + ua.replace(/[^A-Za-z0-9_-]/g, "") + (/^data:image/i.test(va) ? ".jpg" : ".pdf");
+      if(g4.schede[ua] !== firma) daFare.push({uid:ua, nome:nomeF, b64:va.split(",")[1] || "", firma:firma});
+      dati.allegati[ua] = nomeF;
+    }
+    var catena = Promise.resolve();
+    daFare.forEach(function(f, i){
+      catena = catena.then(function(){
+        passo("Carico la scheda " + (i+1) + " di " + daFare.length + " (" + kb(f.b64.length*0.75) + ")\u2026");
+        return ghMettiFileB64(login, token, f.nome, f.b64, "Scheda " + f.uid).then(function(){ g4.schede[f.uid] = f.firma; save(K.gh, g4); });
+      });
+    });
+    return catena.then(function(){ testoDati = JSON.stringify(dati); });
+  }).then(function(){
+    passo("Carico il listino (dati.json, " + kb(testoDati.length) + ")\u2026");
+    return ghMettiFile(login, token, "dati.json", testoDati, "Listino aggiornato");
   }).then(function(){
     passo("Accendo il sito\u2026");
     return ghChiama("GET", "/repos/" + login + "/" + GH_REPO + "/pages", null, token).then(function(r){
@@ -5313,6 +5434,60 @@ $("btnAvvisiJson").addEventListener("click", function(){
   scarica(t, "avvisi.json", "application/json");
   m.className="msg ok"; m.textContent="avvisi.json pronto: "+kb(t.length)+". Caricalo sul sito accanto a index.html.";
 });
+
+/* ---- il link personale legato al numero ---- */
+(function(){
+  var box = document.getElementById("confermaBox"), b = document.getElementById("btnConfermaTel");
+  if(!box || !b) return;
+  if(LINK_CLI && LINK_CLI.daConfermare){
+    box.hidden = false;
+    b.addEventListener("click", function(){
+      var tel = document.getElementById("confermaTel").value, m = document.getElementById("confermaMsg");
+      var imp = improntaNumero(tel, LINK_CLI.code);
+      if(imp && imp === LINK_CLI.t){
+        LINK_CLI.ok = true; delete LINK_CLI.daConfermare; save(K.link, LINK_CLI);
+        m.className = "msg ok"; m.textContent = "Numero confermato: il tuo listino si attiva.";
+        setTimeout(function(){ location.reload(); }, 600);
+      } else {
+        m.className = "msg err"; m.textContent = "Il numero non corrisponde a quello a cui \u00e8 stato mandato questo link. Se il link \u00e8 tuo, scrivi il numero completo (es. 333 1234567).";
+      }
+    });
+  }
+})();
+
+/* ---- sulla schermata Home (solo l'app sul sito) ---- */
+var promptInstalla = null;
+window.addEventListener("beforeinstallprompt", function(e){ e.preventDefault(); promptInstalla = e; disegnaInstalla(); });
+function eStandalone(){
+  try{ return window.navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches); }catch(e){ return false; }
+}
+function disegnaInstalla(){
+  var box = document.getElementById("installaBox"); if(!box) return;
+  if(SORGENTE !== "online" || !CLIENTE || eStandalone() || load("pavpro.installa.no", null)){ box.hidden = true; return; }
+  var ua = navigator.userAgent || "", iOS = /iPhone|iPad|iPod/i.test(ua), t = document.getElementById("installaTesto");
+  if(promptInstalla){
+    t.textContent = "Con un tocco l\u2019app va sulla schermata del telefono, con la sua icona, e si apre senza passare dal browser.";
+    document.getElementById("btnInstalla").hidden = false;
+  } else if(iOS){
+    t.innerHTML = "Per avere l\u2019icona sul telefono: tocca <b>Condividi</b> (il quadrato con la freccia in basso) e poi <b>Aggiungi alla schermata Home</b>. Da l\u00ec in poi si apre come un\u2019app, col tuo listino.";
+    document.getElementById("btnInstalla").hidden = true;
+  } else {
+    t.innerHTML = "Per avere l\u2019icona sul telefono: nel menu del browser (\u22ee) scegli <b>Aggiungi alla schermata Home</b> o <b>Installa app</b>.";
+    document.getElementById("btnInstalla").hidden = true;
+  }
+  box.hidden = false;
+}
+(function(){
+  var b = document.getElementById("btnInstalla"), n = document.getElementById("btnInstallaNo");
+  if(b) b.addEventListener("click", function(){
+    if(!promptInstalla) return;
+    promptInstalla.prompt();
+    promptInstalla.userChoice.then(function(){ promptInstalla = null; document.getElementById("installaBox").hidden = true; });
+  });
+  if(n) n.addEventListener("click", function(){ save("pavpro.installa.no", {quando:new Date().toISOString()}); document.getElementById("installaBox").hidden = true; });
+  if(SORGENTE === "online" && "serviceWorker" in navigator){ try{ navigator.serviceWorker.register("sw.js"); }catch(e){} }
+  setTimeout(disegnaInstalla, 1200);
+})();
 
 /* ---- avvio ---- */
 if(CLIENTE){ $("btnGest").hidden = true; $("navTabs").hidden = true; }
@@ -5500,6 +5675,13 @@ function migraTerrazzoVecchia(){
 }
 
 function agganciaSchedeDiFabbrica(){
+  /* la versione di ieri agganciava gli indirizzi di cementostampato.it:
+     diventano i file nella cartella schede/ del sito dell'app */
+  var tuttiA = attTutti();
+  for(var ua in tuttiA){
+    var va = String(tuttiA[ua] || "");
+    if(/^https:\/\/www\.cementostampato\.it\//i.test(va)) attSet(ua, "schede/" + va.split("/").pop());
+  }
   var giaMessi = load("pavpro.allegatifabbrica.v1", []);
   if(!Array.isArray(giaMessi)) giaMessi = [];
   var agganciati = 0;
@@ -5517,7 +5699,7 @@ function agganciaSchedeDiFabbrica(){
       if(giaMessi.indexOf(segno) >= 0 || giaMessi.indexOf(chiave) >= 0 && !ef.perNome && !ef.perNomi) return;
       /* senza scheda, o con una scheda di cui il file non c'e' piu': arriva quella di fabbrica */
       if(!vaf.pdf || !attProprio(vaf.uid)){
-        attSet(vaf.uid, ef.dati || ef.url);
+        attSet(vaf.uid, ef.dati || ef.file);
         vaf.pdf = {nome:ef.nome, peso:ef.peso};
         agganciati++;
       }
