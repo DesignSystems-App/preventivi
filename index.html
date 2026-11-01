@@ -542,6 +542,11 @@ i.due em{flex:1 1 50%; min-width:0}
             </div>
             <p class="msg" id="copyMsg"></p>
           </div>
+          <div class="card" id="mieiOrdini" hidden>
+            <h2>I tuoi ordini</h2>
+            <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px">Gli ordini mandati da questa app, col loro numero e il PDF firmato.</p>
+            <div id="mieiOrdiniLista"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -869,12 +874,12 @@ if(CLIENTE && SORGENTE === "online"){
       hh.split("&").forEach(function(kv){ var k = kv.split("="); qq[decodeURIComponent(k[0])] = decodeURIComponent((k.slice(1).join("=")||"").replace(/\+/g, " ")); });
       var vociLink = null;
       if(qq.p){ try{ vociLink = JSON.parse(testoDaBase64Url(qq.p)); }catch(e){ vociLink = null; } }
-      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||""};
+      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", mail:qq.e||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||""};
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
       if(giaOk && giaOk.attivato && giaOk.id === LINK_CLI.id && giaOk.code === LINK_CLI.code && giaOk.t === LINK_CLI.t){
-        LINK_CLI.attivato = true; LINK_CLI.okTel = true;
+        LINK_CLI.attivato = true; LINK_CLI.okTel = true; LINK_CLI.telOk = giaOk.telOk || "";
       } else {
         LINK_CLI.daConfermare = true;
         LINK_CLI.okTel = !LINK_CLI.t;            // senza impronta non c'e' numero da chiedere
@@ -3013,6 +3018,18 @@ $("btnTornaGen").addEventListener("click", function(){ apriListinoDi(null); });
 $("mq").addEventListener("input", function(e){ S.mq = Number(e.target.value); salvaSel(); disegna(); });
 $("scarto").addEventListener("input", function(e){ S.scarto = Number(e.target.value); salvaSel(); disegna(); });
 $("mq").value = S.mq; $("scarto").value = S.scarto;
+/* il cliente registrato in gestione trova nome, WhatsApp ed email gia' scritti
+   nel riepilogo (dal link personale o dall'app generata per lui); se li cambia, restano i suoi */
+(function(){
+  if(!CLIENTE) return;
+  var da = (LINK_CLI && LINK_CLI.attivato) ? {nome:LINK_CLI.nome, tel:LINK_CLI.telOk, mail:LINK_CLI.mail} : ((DATI && DATI.cliente) ? DATI.cliente : null);
+  if(!da) return;
+  var mosso = false;
+  if(!String(S.rif||"").trim() && da.nome){ S.rif = da.nome; mosso = true; }
+  if(!String(S.wa||"").trim() && da.tel){ S.wa = String(da.tel).replace(/[^0-9+ ]/g, ""); mosso = true; }
+  if(!String(S.mail||"").trim() && da.mail){ S.mail = da.mail; mosso = true; }
+  if(mosso) salvaSel();
+})();
 $("rifCliente").value = S.rif; $("waNum").value = S.wa; $("mailDest").value = S.mail; $("noteOrd").value = S.note;
 ["azNome","azWa","azMail","azPrivacy"].forEach(function(id, k){
   var campo = ["nome","wa","mail","privacyUrl"][k], el = $(id);
@@ -3848,7 +3865,7 @@ function costruisciApp(cli){
     var dati = { listino:perClienti, allegati:allegati, avvisi:avvisi,
                  avvisiUrl: load(K.avUrl, ""), baseUrl: load(K.base, ""), azienda: completaAzienda(load(K.azienda, null)),
                  sfrido:Number(S.scarto)||0, prodExtra:PRODOTTI_EXTRA.slice(), quando:new Date().toISOString() };
-    if(cli) dati.cliente = {nome:cli.nome||"", code:cli.code||""};
+    if(cli) dati.cliente = {nome:cli.nome||"", code:cli.code||"", tel:cli.tel||"", mail:cli.mail||""};
     dati.rev = firmaDati({listino:dati.listino, allegati:dati.allegati, sfrido:dati.sfrido});
     var json = JSON.stringify(dati).replace(/</g, "\\u003c");
     var html = modello.replace(MARCA_DATI, function(){ return "var DATI = " + json + ";"; });
@@ -3903,7 +3920,8 @@ function improntaNumero(tel, code){
 function linkCliente(cli){
   var base = load(K.base, "");
   if(!/^https?:\/\//i.test(base)) return null;
-  var url = base.replace(/\/+$/, "") + "/#c=" + encodeURIComponent(cli.code||"") + "&n=" + encodeURIComponent(cli.nome||"") + "&i=" + encodeURIComponent(cli.id||"");
+  var url = base.replace(/\/+$/, "") + "/#c=" + encodeURIComponent(cli.code||"") + "&n=" + encodeURIComponent(cli.nome||"") + "&i=" + encodeURIComponent(cli.id||"")
+          + (cli.mail ? "&e=" + encodeURIComponent(cli.mail) : "");
   var imp = improntaNumero(cli.tel, cli.code);
   if(imp) url += "&t=" + imp;
   var voci = migraVociCliente(clone(cli.voci || {}));
@@ -4269,7 +4287,7 @@ function disegnaRiepilogo(r){
 
 function testoRiepilogo(){
   var r = calcola(), L = [], ordine = (S.modo === "ordine"), conferma = testoFirma();
-  L.push(ordine ? "RIEPILOGO ORDINE" : "PREVENTIVO MATERIALI");
+  L.push(ordine ? "RIEPILOGO ORDINE" + (ORD_CORRENTE && ORD_CORRENTE.numero ? " N. " + ORD_CORRENTE.numero : "") : "PREVENTIVO MATERIALI");
   L.push(new Date().toLocaleDateString("it-IT"));
   L.push("");
   if(ordine){
@@ -4391,24 +4409,38 @@ PdfDoc.prototype.linea = function(spessore, grigio){
 PdfDoc.prototype.vuoto = function(h){ this.y -= h; };
 PdfDoc.prototype.immagineJpeg = function(b64, w, h, pxW, pxH){
   this.spazio(h + 6); this.y -= h;
-  this.img = {b64:b64, w:pxW, h:pxH};
-  this.cur.push("q " + w.toFixed(2) + " 0 0 " + h.toFixed(2) + " " + this.m + " " + this.y.toFixed(2) + " cm /Im1 Do Q");
+  var n = this.aggiungiImg(b64, pxW, pxH);
+  this.cur.push("q " + w.toFixed(2) + " 0 0 " + h.toFixed(2) + " " + this.m + " " + this.y.toFixed(2) + " cm /Im" + n + " Do Q");
+};
+PdfDoc.prototype.aggiungiImg = function(b64, pxW, pxH){
+  this.imgs = this.imgs || [];
+  this.imgs.push({b64:b64, w:pxW, h:pxH});
+  return this.imgs.length;
+};
+/* una pagina intera occupata da un'immagine (la tela dell'ordine) */
+PdfDoc.prototype.paginaImmagine = function(b64, pxW, pxH, prima){
+  if(!prima) this.nuovaPagina();
+  var n = this.aggiungiImg(b64, pxW, pxH);
+  var w = this.W - 2*this.m, h = w * pxH / pxW;
+  this.cur.push("q " + w.toFixed(2) + " 0 0 " + h.toFixed(2) + " " + this.m + " " + (this.H - this.m - h).toFixed(2) + " cm /Im" + n + " Do Q");
+  this.y = this.H - this.m - h;
 };
 PdfDoc.prototype.bytes = function(){
   var self = this, objs = [], add = function(s){ objs.push(s); return objs.length; };
   var fontN = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   var fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  var imgN = null, imgBin = null;
-  if(this.img){
-    imgBin = atob(this.img.b64);
-    imgN = add("<< /Type /XObject /Subtype /Image /Width " + this.img.w + " /Height " + this.img.h + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + imgBin.length + " >>\nstream\n" + imgBin + "\nendstream");
-  }
+  var imgNs = [];
+  (this.imgs || []).forEach(function(im){
+    var bin = atob(im.b64);
+    imgNs.push(add("<< /Type /XObject /Subtype /Image /Width " + im.w + " /Height " + im.h + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + bin.length + " >>\nstream\n" + bin + "\nendstream"));
+  });
+  var xobj = imgNs.length ? " /XObject << " + imgNs.map(function(n, i){ return "/Im" + (i+1) + " " + n + " 0 R"; }).join(" ") + " >>" : "";
   var pagesN = objs.length + 1 + this.pagine.length * 2;   // calcolato: le pagine vengono prima
   var pageNums = [];
   this.pagine.forEach(function(cont){
     var c = cont.join("\n");
     var cN = add("<< /Length " + c.length + " >>\nstream\n" + c + "\nendstream");
-    var pN = add("<< /Type /Page /Parent " + pagesN + " 0 R /MediaBox [0 0 " + self.W + " " + self.H + "] /Contents " + cN + " 0 R /Resources << /Font << /F1 " + fontN + " 0 R /F2 " + fontB + " 0 R >>" + (imgN ? " /XObject << /Im1 " + imgN + " 0 R >>" : "") + " >> >>");
+    var pN = add("<< /Type /Page /Parent " + pagesN + " 0 R /MediaBox [0 0 " + self.W + " " + self.H + "] /Contents " + cN + " 0 R /Resources << /Font << /F1 " + fontN + " 0 R /F2 " + fontB + " 0 R >>" + xobj + " >> >>");
     pageNums.push(pN);
   });
   var pagesReal = add("<< /Type /Pages /Kids [" + pageNums.map(function(n){ return n + " 0 R"; }).join(" ") + "] /Count " + pageNums.length + " >>");
@@ -4432,7 +4464,8 @@ function firmaJpeg(){
   var g = c2.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c2.width, c2.height); g.drawImage(cv, 0, 0);
   return {b64:c2.toDataURL("image/jpeg", 0.85).split(",")[1], w:c2.width, h:c2.height};
 }
-function pdfOrdine(){
+function pdfOrdine(){ return pdfOrdineGrafico(); }
+function pdfOrdineTesto(){
   var r = calcola(), d = new PdfDoc(), ordine = (S.modo === "ordine"), oggi = new Date();
   var voci = vociPreventivo(r), grigio = "0.35 0.35 0.35", accento = "0.55 0.33 0.12";
   d.testo((AZIENDA.nome || "Design Systems Srl"), d.m, 10, true); d.y -= 0;
@@ -4480,20 +4513,277 @@ function pdfOrdine(){
   if(fj){ d.vuoto(4); var w = 200, h = Math.round(w * fj.h / fj.w); d.immagineJpeg(fj.b64, w, h, fj.w, fj.h); }
   return new Blob([d.bytes()], {type:"application/pdf"});
 }
-function nomePdfOrdine(){
-  return "Ordine-" + nomeFile(S.rif || "cliente") + "-" + new Date().toISOString().slice(0,10) + ".pdf";
+/* ------------------------------------------------------------------
+   L'ORDINE DISEGNATO COME NELL'APP
+   Stessa grafica del riepilogo: barra col logo, riquadri, prodotti,
+   totali, consenso privacy e firma. Si disegna su una tela larga 900
+   px (a doppia risoluzione) e poi si taglia in pagine A4.
+   ------------------------------------------------------------------ */
+function telaOrdine(){
+  var r = calcola(), voci = vociPreventivo(r), ordine = (S.modo === "ordine");
+  var W = 900, M = 36, SC = 2, oggi = new Date();
+  var C = {bg:"#e9dec9", surf:"#ffffff", surf2:"#f7f1e4", surf3:"#efe6d4", line:"#ded0b6", lineS:"#c4b091", fg:"#2a2117", muted:"#6e6253",
+           accent:"#c7a36a", bar:"#d9c094", barInk:"#33250f", signal:"#a0521d", ok:"#4a6b36", okSoft:"#e1e9d4", accSoft:"#f0e4cc"};
+  var FB = '"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+  var FD = '"Archivo","Helvetica Neue",Arial,sans-serif';
+  var FM = '"IBM Plex Mono",Menlo,monospace';
+  /* prima si misura (tela provvisoria), poi si disegna per davvero */
+  function disegna(cv, soloMisura){
+    var g = cv.getContext("2d");
+    if(!soloMisura){ g.setTransform(SC, 0, 0, SC, 0, 0); }
+    var y = 0;
+    function font(peso, px, fam){ g.font = peso + " " + px + "px " + (fam || FB); }
+    function wrap(t, maxW){
+      var parole = String(t||"").split(/\s+/), righe = [], riga = "";
+      parole.forEach(function(pz){ var prova = riga ? riga + " " + pz : pz; if(g.measureText(prova).width <= maxW || !riga) riga = prova; else { righe.push(riga); riga = pz; } });
+      if(riga) righe.push(riga); return righe;
+    }
+    function testo(t, x, yy, opz){
+      opz = opz || {}; g.fillStyle = opz.col || C.fg; g.textAlign = opz.destra ? "right" : "left"; g.textBaseline = "alphabetic";
+      if(!soloMisura) g.fillText(t, x, yy);
+    }
+    function para(t, x, maxW, lh, opz){
+      var righe = wrap(t, maxW);
+      righe.forEach(function(rg){ y += lh; testo(rg, x, y, opz); });
+      return righe.length;
+    }
+    function rett(x, yy, w, h, fill, stroke, rad){
+      if(soloMisura) return;
+      rad = rad || 4;
+      g.beginPath(); g.moveTo(x+rad, yy); g.lineTo(x+w-rad, yy); g.quadraticCurveTo(x+w, yy, x+w, yy+rad); g.lineTo(x+w, yy+h-rad); g.quadraticCurveTo(x+w, yy+h, x+w-rad, yy+h);
+      g.lineTo(x+rad, yy+h); g.quadraticCurveTo(x, yy+h, x, yy+h-rad); g.lineTo(x, yy+rad); g.quadraticCurveTo(x, yy, x+rad, yy); g.closePath();
+      if(fill){ g.fillStyle = fill; g.fill(); } if(stroke){ g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); }
+    }
+    function linea(x1, x2, yy, col){ if(soloMisura) return; g.strokeStyle = col || C.line; g.lineWidth = 1; g.beginPath(); g.moveTo(x1, yy); g.lineTo(x2, yy); g.stroke(); }
+    function campo(etich, val, x, w, yy){
+      font("600", 10.5); testo(etich.toUpperCase(), x, yy + 11, {col:C.muted});
+      rett(x, yy + 17, w, 34, C.surf2, C.lineS, 4);
+      font("400", 14); testo(val || "\u2014", x + 10, yy + 39);
+      return 51;
+    }
+    /* sfondo e barra */
+    var Hbar = 76;
+    if(!soloMisura){ g.fillStyle = C.bg; g.fillRect(0, 0, W, cv.height / SC); g.fillStyle = C.bar; g.fillRect(0, 0, W, Hbar); }
+    var logo = document.querySelector(".marchio img");
+    var lx = M;
+    if(logo && logo.naturalWidth){ var lh = 40, lw = lh * logo.naturalWidth / logo.naturalHeight; if(!soloMisura){ g.fillStyle = "#fff"; g.fillRect(M, 14, lw + 12, lh + 8); g.drawImage(logo, M + 6, 18, lw, lh); } lx = M + lw + 28; }
+    font("700", 21, FD); testo("Preventivi Pavimenti", lx, 36, {col:C.barInk});
+    font("400", 11.5); testo((r.g.nome + (r.g.varianti.length>1 ? " \u00b7 " + r.v.nome : "") + (NOME_CLIENTE ? " \u00b7 listino di " + NOME_CLIENTE : "")).toUpperCase(), lx, 56, {col:C.barInk});
+    if(ORD_CORRENTE && ORD_CORRENTE.numero){ font("700", 15, FD); testo("Ordine n. " + ORD_CORRENTE.numero, W - M, 34, {col:C.barInk, destra:true}); }
+    font("400", 11); testo(oggi.toLocaleDateString("it-IT") + " " + oggi.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}), W - M, ORD_CORRENTE && ORD_CORRENTE.numero ? 52 : 36, {col:C.barInk, destra:true});
+    y = Hbar + 18;
+    /* riquadro cliente e ordine */
+    var cardX = M, cardW = W - 2*M, px = cardX + 18, pw = cardW - 36;
+    var cardY = y;
+    y += 18;
+    font("700", 17, FD); y += 17; testo(ordine ? "Riepilogo dell\u2019ordine" : "Preventivo materiali", px, y);
+    y += 10;
+    var mezza = (pw - 14) / 2;
+    var h1 = campo("Cliente o cantiere", S.rif, px, mezza, y); campo("WhatsApp del cliente", S.wa, px + mezza + 14, mezza, y); y += h1 + 10;
+    y += campo("Email del cliente", S.mail, px, pw, y) + 10;
+    if(String(S.note||"").trim()){
+      font("600", 10.5); testo("NOTE", px, y + 11, {col:C.muted}); y += 17;
+      var yn = y; font("400", 13); var n = wrap(S.note, pw - 24).length; var hn = n * 18 + 16;
+      rett(px, yn, pw, hn, C.surf2, C.lineS, 4); y = yn + 4; para(S.note, px + 12, pw - 24, 18); y = yn + hn + 10;
+    }
+    if(cliente){
+      var lb = y; var hl = 54;
+      rett(px, lb, pw, hl, C.okSoft, C.ok, 4);
+      if(!soloMisura){ g.fillStyle = C.ok; g.beginPath(); g.arc(px + 16, lb + 18, 4, 0, 6.3); g.fill(); }
+      font("600", 13); testo(chiHaLoSconto() ? "Sconto di " + chiHaLoSconto() + " attivo" : "Sconto riservato attivo", px + 28, lb + 22, {col:C.ok});
+      font("400", 11.5); testo("sconto base " + N(cliente.base) + "%" + (cliente.code ? " \u00b7 codice " + cliente.code : "") + (cliente.scadenza ? " \u00b7 valido fino al " + cliente.scadenza.toLocaleDateString("it-IT") : ""), px + 28, lb + 41, {col:C.fg});
+      y = lb + hl + 12;
+    }
+    /* sistema */
+    font("700", 14, FD); y += 16; testo(r.g.nome + (r.g.varianti.length>1 ? " \u2014 " + r.v.nome : ""), px, y);
+    font("400", 12); y += 16; testo(N(r.mq) + " m\u00b2" + (r.sc>0 ? " (sfrido +" + N(r.sc) + "%)" : ""), px, y, {col:C.muted});
+    y += 8; linea(px, px + pw, y, C.lineS); y += 4;
+    /* prodotti */
+    voci.forEach(function(v){
+      var importo = v.costo===null ? "da definire" : E(ordine ? v.netto : v.costo);
+      font("700", 14, FD); y += 20;
+      var nomeW = pw - 130; var righeN = wrap(v.nome + (v.extra ? " \u2014 " + v.extra : ""), nomeW);
+      testo(righeN[0], px, y); font("400", 15, FM); testo(importo, px + pw, y, {destra:true});
+      font("700", 14, FD); righeN.slice(1).forEach(function(rg){ y += 17; testo(rg, px, y); });
+      if(ordine && v.sconto > 0 && v.costo !== null){ font("400", 11.5, FM); y += 16; testo("listino " + E(v.costo) + "  \u2212  sconto " + N(v.sconto) + "%", px, y, {col:C.muted}); }
+      if(v.avviso){ font("600", 11); para(v.avviso.toUpperCase(), px, pw, 15, {col:C.signal}); }
+      font("400", 11.5, FM); para(v.det, px, pw, 15, {col:C.muted});
+      v.sotto.forEach(function(t){ font("400", 11.5, FM); para("\u2013 " + t, px + 12, pw - 12, 15, {col:C.muted}); });
+      y += 10; linea(px, px + pw, y, C.line);
+    });
+    /* totali */
+    y += 6;
+    function tot(sx, dx, opz){ opz = opz || {}; font(opz.bold ? "600" : "400", 13.5); y += 22; testo(sx, px, y, {col:opz.col}); font("400", 14, FM); testo(dx, px + pw, y, {destra:true, col:opz.col}); }
+    tot("Materiale a listino", E(r.lordo));
+    if(cliente) tot(etichettaSconto(r), "\u2212" + E(r.scontoEur), {col:C.signal, bold:true});
+    tot("Imponibile", E(r.netto));
+    tot("IVA 22%", E(r.iva));
+    y += 10; linea(px, px + pw, y, C.lineS);
+    font("600", 15); y += 34; testo("Totale IVA inclusa", px, y);
+    font("700", 28, FD); testo(E(r.netto + r.iva), px + pw, y, {destra:true});
+    font("400", 11.5, FM); y += 20; testo((r.mq>0 ? "\u2248 " + E(r.nettoMq) + "/m\u00b2 imponibile \u00b7 " : "") + "imballo e trasporto esclusi", px, y, {col:C.muted});
+    if(r.senzaPrezzo > 0){ font("400", 11.5); y += 16; testo(r.senzaPrezzo + (r.senzaPrezzo>1 ? " voci senza prezzo: non conteggiate" : " voce senza prezzo: non conteggiata"), px, y, {col:C.signal}); }
+    y += 16;
+    /* privacy */
+    var pb = y; var okP = !!(S.privacy && S.privacy.quando);
+    font("400", 12); var tp = "Ho letto l\u2019informativa sulla privacy e acconsento al trattamento dei miei dati (nome, telefono, email, note dell\u2019ordine) per la gestione del preventivo e dell\u2019ordine.";
+    var rp = wrap(tp, pw - 56); var hp = rp.length * 16 + 36 + (okP ? 16 : 0);
+    rett(px, pb, pw, hp, C.surf2, C.lineS, 4);
+    rett(px + 14, pb + 14, 18, 18, okP ? C.accent : C.surf, C.lineS, 3);
+    if(okP && !soloMisura){ g.strokeStyle = "#fff"; g.lineWidth = 2.2; g.beginPath(); g.moveTo(px + 18, pb + 23); g.lineTo(px + 22, pb + 27); g.lineTo(px + 29, pb + 18); g.stroke(); }
+    y = pb + 12; rp.forEach(function(rg){ y += 16; testo(rg, px + 42, y); });
+    if(okP){ font("400", 11); y += 16; testo("Consenso dato il " + new Date(S.privacy.quando).toLocaleDateString("it-IT") + " alle " + new Date(S.privacy.quando).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) + ".", px + 42, y, {col:C.muted}); }
+    y = pb + hp + 14;
+    /* firma */
+    font("600", 10.5); y += 12; testo("FIRMA PER CONFERMA DELL\u2019ORDINE", px, y, {col:C.muted}); y += 6;
+    var fcv = document.getElementById("firma"), fh = 150;
+    rett(px, y, pw, fh, "#fff", C.ok, 4);
+    if(fcv && firmaFatta && !soloMisura){ var fw = Math.min(pw - 20, (fh - 20) * fcv.width / fcv.height), fhh = fw * fcv.height / fcv.width; g.drawImage(fcv, px + 10, y + (fh - fhh)/2, fw, fhh); }
+    y += fh;
+    font("400", 11.5); y += 18; testo(testoFirma() || "Non firmato.", px, y, {col:C.muted});
+    y += 18;
+    /* il riquadro grande intorno a tutto */
+    var fine = y + 6;
+    if(!soloMisura){ g.globalCompositeOperation = "destination-over"; rett(cardX, cardY, cardW, fine - cardY, C.surf, C.lineS, 6); g.globalCompositeOperation = "source-over"; }
+    y = fine;
+    font("400", 10.5); y += 22;
+    if(!soloMisura){ g.fillStyle = C.muted; g.textAlign = "center"; g.fillText((AZIENDA.nome || "Design Systems Srl") + " \u00b7 " + [AZIENDA.mail, AZIENDA.wa ? "WhatsApp " + AZIENDA.wa : ""].filter(Boolean).join(" \u00b7 "), W/2, y); }
+    return y + 20;
+  }
+  var mis = document.createElement("canvas"); mis.width = W; mis.height = 100;
+  var H = Math.ceil(disegna(mis, true));
+  var cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC;
+  disegna(cv, false);
+  return cv;
 }
+/* la tela, tagliata in pagine A4 (JPEG), dentro al PDF */
+function pdfOrdineGrafico(){
+  var cv = telaOrdine(), W = cv.width, H = cv.height;
+  var pagH = Math.round(W * (841.89 - 2*42) / (595.28 - 2*42));
+  var d = new PdfDoc(), prima = true;
+  for(var y0 = 0; y0 < H; y0 += pagH){
+    var h = Math.min(pagH, H - y0);
+    var pg = document.createElement("canvas"); pg.width = W; pg.height = h;
+    var g = pg.getContext("2d"); g.fillStyle = "#e9dec9"; g.fillRect(0, 0, W, h); g.drawImage(cv, 0, y0, W, h, 0, 0, W, h);
+    d.paginaImmagine(pg.toDataURL("image/jpeg", 0.88).split(",")[1], W, h, prima);
+    prima = false;
+  }
+  return new Blob([d.bytes()], {type:"application/pdf"});
+}
+function nomePdfOrdine(){
+  return "Ordine-" + (ORD_CORRENTE && ORD_CORRENTE.numero ? ORD_CORRENTE.numero + "-" : "") + nomeFile(S.rif || "cliente") + "-" + new Date().toISOString().slice(0,10) + ".pdf";
+}
+
+/* ------------------------------------------------------------------
+   GLI ORDINI: NUMERO E MEMORIA
+   Il servizio da' il numero progressivo e conserva dati e PDF; una copia
+   resta anche sul telefono ("I tuoi ordini"). Senza servizio, il numero
+   e' locale (L-0001) e l'ordine resta solo sul dispositivo.
+   ------------------------------------------------------------------ */
+var ORD_CORRENTE = null;
+function ordiniLocali(){ var l = load("pavpro.ordini.v1", []); return Array.isArray(l) ? l : []; }
+function ordSalvaLocale(meta, pdfB64){
+  var l = ordiniLocali().filter(function(o){ return o.numero !== meta.numero; });
+  l.unshift(meta); save("pavpro.ordini.v1", l.slice(0, 100));
+  if(pdfB64){ ATT["ord:" + meta.numero] = "data:application/pdf;base64," + pdfB64; archivioScrivi("ord:" + meta.numero, ATT["ord:" + meta.numero]); }
+}
+function datiOrdine(r){
+  var ordine = (S.modo === "ordine");
+  return { id: (LINK_CLI && LINK_CLI.id) || "", device: idDispositivo(),
+           cliente: {nome:S.rif||"", tel:S.wa||"", mail:S.mail||""},
+           sistema: r.g.nome + (r.g.varianti.length>1 ? " \u2014 " + r.v.nome : ""), mq: r.mq,
+           imponibile: Math.round(r.netto*100)/100, iva: Math.round(r.iva*100)/100, totale: Math.round((r.netto+r.iva)*100)/100,
+           righe: vociPreventivo(r).map(function(v){ return {nome:v.nome + (v.extra ? " \u2014 " + v.extra : ""), importo: v.costo===null ? 0 : Math.round((ordine ? v.netto : v.costo)*100)/100, det:v.det}; }),
+           note: S.note || "", testo: testoRiepilogo() };
+}
+/* chiede il numero al servizio; poi(numero, dalServizio) */
+function registraOrdine(poi){
+  var u = urlAttivazioni(), r = calcola(), dati = datiOrdine(r);
+  function locale(){
+    var c = (Number(load("pavpro.ordini.cont", 0)) || 0) + 1; save("pavpro.ordini.cont", c);
+    poi("L-" + ("0000" + c).slice(-4), false);
+  }
+  if(!u){ locale(); return; }
+  fetch(u + "/ordine", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(dati)})
+    .then(function(x){ return x.json(); })
+    .then(function(j){ if(j && j.ok && j.numero) poi(j.numero, true); else locale(); })
+    .catch(function(){ locale(); });
+}
+function mandaPdfAlServizio(numero, b64){
+  var u = urlAttivazioni(); if(!u) return;
+  fetch(u + "/ordine/pdf", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({numero:numero, device:idDispositivo(), pdf:b64})}).catch(function(){});
+}
+function blobABase64(blob, poi){ var fr = new FileReader(); fr.onload = function(){ poi(String(fr.result).split(",")[1] || ""); }; fr.readAsDataURL(blob); }
+function apriPdfB64(b64, nome){
+  var bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  var blob = new Blob([u8], {type:"application/pdf"}), url = URL.createObjectURL(blob);
+  var w = window.open(url, "_blank");
+  if(!w) scaricaBlob(blob, nome || "ordine.pdf");
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+}
+/* "I tuoi ordini" nell'app del cliente: quelli sul telefono piu' quelli del servizio */
+function disegnaMieiOrdini(){
+  var box = document.getElementById("mieiOrdini"); if(!box || !CLIENTE) return;
+  var locali = ordiniLocali();
+  function mostra(lista){
+    if(!lista.length){ box.hidden = true; return; }
+    box.hidden = false;
+    document.getElementById("mieiOrdiniLista").innerHTML = lista.map(function(o){
+      var q = o.quando ? new Date(o.quando) : null;
+      return '<div class="tline"><span><b>n. ' + esc(o.numero) + '</b> \u00b7 ' + (q ? q.toLocaleDateString("it-IT") : "") + '<br><small style="color:var(--muted)">' + esc(o.sistema||"") + '</small></span>'
+           + '<span style="text-align:right"><b>' + E(o.totale||0) + '</b><br><button class="btn sec small" type="button" data-ordpdf="' + esc(o.numero) + '">PDF</button></span></div>';
+    }).join("");
+  }
+  mostra(locali);
+  var u = urlAttivazioni();
+  if(u && LINK_CLI && LINK_CLI.id && LINK_CLI.attivato){
+    fetch(u + "/miei", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:LINK_CLI.id, device:idDispositivo()})})
+      .then(function(x){ return x.json(); })
+      .then(function(j){
+        if(!j || !j.ok) return;
+        var visti = {}, tutti = [];
+        (j.ordini || []).concat(locali).forEach(function(o){ if(!visti[o.numero]){ visti[o.numero] = 1; tutti.push(o); } });
+        tutti.sort(function(a, b){ return a.numero < b.numero ? 1 : -1; });
+        mostra(tutti);
+      }).catch(function(){});
+  }
+}
+document.addEventListener("click", function(e){
+  var t = e.target.closest("[data-ordpdf]"); if(!t) return;
+  var n = t.getAttribute("data-ordpdf"), m = document.getElementById("copyMsg");
+  var loc = ATT["ord:" + n];
+  if(loc){ apriPdfB64(loc.split(",")[1], "Ordine-" + n + ".pdf"); return; }
+  var u = urlAttivazioni(); if(!u){ if(m){ m.className="msg err"; m.textContent="Il PDF di questo ordine non \u00e8 su questo telefono."; } return; }
+  fetch(u + "/pdf", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({numero:n, device:idDispositivo()})})
+    .then(function(x){ return x.json(); })
+    .then(function(j){ if(j && j.ok && j.pdf) apriPdfB64(j.pdf, "Ordine-" + n + ".pdf"); else if(m){ m.className="msg err"; m.textContent="PDF non disponibile."; } })
+    .catch(function(){ if(m){ m.className="msg err"; m.textContent="Non raggiungo il servizio."; } });
+});
 /* l'ordine in PDF parte dal foglio di condivisione del telefono (WhatsApp,
    Mail, ...); dove non c'e', si scarica e si apre WhatsApp/email col testo breve */
 /* L'ordine arriva in azienda su due canali: il PDF su WhatsApp e il testo
    completo per email. via = "tutti" (un gesto, prima WhatsApp poi l'email),
    "wa" o "mail" da soli. */
 function mandaOrdinePdf(via, m){
+  if(via === "mail"){ apriCanale("mail", testoRiepilogo()); m.className="msg ok"; m.textContent="Email con l\u2019ordine completo aperta: premi Invia."; return; }
+  m.className = "msg"; m.textContent = "Registro l\u2019ordine e preparo il PDF\u2026";
+  registraOrdine(function(numero, dalServizio){
+    ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio};
+    mandaOrdinePdf2(via, m);
+  });
+}
+function mandaOrdinePdf2(via, m){
   var blob, nome = nomePdfOrdine();
   try{ blob = pdfOrdine(); }catch(e){ m.className="msg err"; m.textContent="Non riesco a preparare il PDF: " + e.message; return; }
-  var breve = "Ordine di " + (S.rif || "cliente") + " per " + (AZIENDA.nome || "Design Systems") + " \u2014 il dettaglio \u00e8 nel PDF allegato.";
-  var poiEmail = (via === "tutti") ? function(){ setTimeout(function(){ apriCanale("mail", testoRiepilogo()); }, 900); } : function(){};
-  if(via === "mail"){ apriCanale("mail", testoRiepilogo()); m.className="msg ok"; m.textContent="Email con l\u2019ordine completo aperta: premi Invia."; return; }
+  var rr = calcola();
+  blobABase64(blob, function(b64){
+    ordSalvaLocale({numero:ORD_CORRENTE.numero, quando:ORD_CORRENTE.quando, sistema:rr.g.nome, totale:Math.round((rr.netto+rr.iva)*100)/100, imponibile:Math.round(rr.netto*100)/100}, b64);
+    if(ORD_CORRENTE.dalServizio) mandaPdfAlServizio(ORD_CORRENTE.numero, b64);
+    disegnaMieiOrdini();
+  });
+  var breve = "Ordine n. " + ORD_CORRENTE.numero + " di " + (S.rif || "cliente") + " per " + (AZIENDA.nome || "Design Systems") + " \u2014 il dettaglio \u00e8 nel PDF allegato.";
+  var poiEmail = (via === "tutti") ? function(){ setTimeout(function(){ apriCanale("mail", "Ordine n. " + ORD_CORRENTE.numero + "\n\n" + testoRiepilogo()); }, 900); } : function(){};
   var file = null; try{ file = new File([blob], nome, {type:"application/pdf"}); }catch(e){}
   if(file && navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
     navigator.share({files:[file], title:"Ordine " + (S.rif||""), text:breve}).then(function(){
@@ -4716,7 +5006,7 @@ $("btnPdfOrdine").addEventListener("click", function(){
   var m = $("copyMsg"), blob;
   try{ blob = pdfOrdine(); }catch(e){ m.className="msg err"; m.textContent="Non riesco a preparare il PDF: " + e.message; return; }
   scaricaBlob(blob, nomePdfOrdine());
-  m.className="msg ok"; m.textContent="PDF scaricato (" + kb(blob.size) + ").";
+  m.className="msg ok"; m.textContent="PDF scaricato (" + kb(blob.size) + ")" + (ORD_CORRENTE ? " \u2014 ordine n. " + ORD_CORRENTE.numero : " \u2014 senza numero: il numero arriva quando lo mandi") + ".";
 });
 
 /* ---- gestione ---- */
@@ -4748,6 +5038,7 @@ function mostraStatoSalvataggio(){
 }
 $("tabCod").addEventListener("click", function(){
   mostraVista("cod");
+  disegnaOrdiniRicevuti();
   disegnaGenSconti();
   collegaBozzaCliente();
   if(!cliInModifica){
@@ -4938,6 +5229,7 @@ function disegnaClienti(){
     return '<div class="cliente">'
       + '<span class="nm">'+esc(c.nome || "(senza nome)")+'</span>'
       + '<span class="az">'
+        + '<button class="btn sec small" type="button" data-cliapri="'+esc(c.id)+'">Apri la sua app</button>'
         + '<button class="btn sec small" type="button" data-clilink="'+esc(c.id)+'">Link su WhatsApp</button>'
         + '<button class="btn sec small" type="button" data-clicopialink="'+esc(c.id)+'">Copia il link</button>'
         + '<button class="btn sec small" type="button" data-cliprezzi="'+esc(c.id)+'">Prezzi suoi</button>'
@@ -5085,6 +5377,16 @@ $("elencoClienti").addEventListener("click", function(e){
   if((t = e.target.closest("[data-cliapp]"))){
     var ca = clienti.find(function(x){ return x.id === t.getAttribute("data-cliapp"); });
     if(ca) generaApp(ca, m);
+    return;
+  }
+  if((t = e.target.closest("[data-cliapri]"))){
+    var cap = clienti.find(function(x){ return x.id === t.getAttribute("data-cliapri"); });
+    if(cap){
+      var lk = linkCliente(cap);
+      if(!lk){ m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso)."; return; }
+      window.open(lk, "_blank", "noopener");
+      m.className="msg ok"; m.textContent="App di " + (cap.nome||"questo cliente") + " aperta in una scheda nuova. Attenzione: aprendola da qui la attivi su questo computer; se il link \u00e8 usa e getta, dopo la prova premi Sblocca link.";
+    }
     return;
   }
   if((t = e.target.closest("[data-cliatt]"))){
@@ -5691,6 +5993,8 @@ $("btnCopiaLinkSito").addEventListener("click", function(){
 });
 function attImpostazioni(){
   var a = load(K.att, null);
+  /* l'indirizzo del servizio e' cambiato (Cloudflare ha rinominato il sottodominio) */
+  if(a && /fragrant-forest-8416\.workers\.dev/.test(a.url||"")){ a.url = "https://pavpro-attivazioni.soft-river-2817.workers.dev"; save(K.att, a); }
   if((!a || !a.url) && ATT_PRECOMPILATO && ATT_PRECOMPILATO.url){ a = a || {}; a.url = ATT_PRECOMPILATO.url; a.chiave = a.chiave || ATT_PRECOMPILATO.chiave || ""; save(K.att, a); }
   return a || {};
 }
@@ -5698,6 +6002,38 @@ function attImpostazioni(){
   var a = attImpostazioni();
   $(id).value = id === "attUrl" ? (a.url || "") : (a.chiave || "");
   $(id).addEventListener("input", function(){ var a2 = attImpostazioni(); a2.url = $("attUrl").value.trim(); a2.chiave = $("attChiave").value.trim(); save(K.att, a2); });
+});
+/* gli ordini ricevuti, dal servizio */
+function disegnaOrdiniRicevuti(){
+  var a = attImpostazioni(), box = $("elencoOrdini"), m = $("ordiniMsg");
+  if(!/^https?:\/\//i.test(a.url||"") || !a.chiave){ box.innerHTML = '<p style="font-size:13px;color:var(--muted);margin:0">Imposta il servizio attivazioni (Comunicazioni) per vedere gli ordini.</p>'; return; }
+  m.className = "msg"; m.textContent = "Chiedo gli ordini\u2026";
+  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:"ordini"})})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!j || !j.ok){ m.className="msg err"; m.textContent = "Il servizio non risponde come dovrebbe" + (j && j.motivo === "chiave" ? ": parola d\u2019ordine sbagliata." : "."); return; }
+      var l = j.ordini || [];
+      $("contaOrdini").textContent = "(" + l.length + ")";
+      m.className = "msg"; m.textContent = l.length ? "" : "Nessun ordine ancora.";
+      box.innerHTML = l.map(function(o){
+        var q = o.quando ? new Date(o.quando) : null;
+        return '<div class="cliente"><span class="nm">Ordine n. ' + esc(o.numero) + ' \u00b7 ' + esc((o.cliente && o.cliente.nome) || "(senza nome)") + '</span>'
+          + '<span class="az"><button class="btn sec small" type="button" data-ordadm="' + esc(o.numero) + '"' + (o.pdf ? '' : ' disabled') + '>PDF firmato</button></span>'
+          + '<span class="dt">' + (q ? q.toLocaleDateString("it-IT") + " " + q.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : "") + ' \u00b7 ' + esc(o.sistema||"") + ' \u00b7 ' + N(o.mq||0) + ' m\u00b2 \u00b7 imponibile ' + E(o.imponibile||0) + ' \u00b7 <b>totale ' + E(o.totale||0) + '</b>'
+          + ((o.cliente && (o.cliente.tel || o.cliente.mail)) ? ' \u00b7 ' + esc([o.cliente.tel, o.cliente.mail].filter(Boolean).join(" \u00b7 ")) : '') + '</span></div>';
+      }).join("");
+    })
+    .catch(function(){ m.className="msg err"; m.textContent="Non raggiungo il servizio (sei collegato a internet?)."; });
+}
+$("btnOrdiniAgg").addEventListener("click", disegnaOrdiniRicevuti);
+$("elencoOrdini").addEventListener("click", function(e){
+  var t = e.target.closest("[data-ordadm]"); if(!t) return;
+  var a = attImpostazioni(), n = t.getAttribute("data-ordadm"), m = $("ordiniMsg");
+  m.className = "msg"; m.textContent = "Scarico il PDF dell\u2019ordine " + n + "\u2026";
+  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:"ordinePdf", numero:n})})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ if(j && j.ok && j.pdf){ apriPdfB64(j.pdf, "Ordine-" + n + ".pdf"); m.textContent = ""; } else { m.className="msg err"; m.textContent="PDF non disponibile."; } })
+    .catch(function(){ m.className="msg err"; m.textContent="Non raggiungo il servizio."; });
 });
 /* chiamate al servizio dalla gestione: stato, sblocca, blocca */
 function attAdmin(azione, cli, m){
@@ -5773,7 +6109,9 @@ function testoRifiuto(motivo){
     m.className = "msg"; m.textContent = "Attivo il tuo listino\u2026";
     attivaSulServizio(tel, function(ok, motivo){
       if(ok){
-        LINK_CLI.attivato = true; LINK_CLI.okTel = true; delete LINK_CLI.daConfermare; save(K.link, LINK_CLI);
+        LINK_CLI.attivato = true; LINK_CLI.okTel = true; delete LINK_CLI.daConfermare;
+        if(tel) LINK_CLI.telOk = String(tel).replace(/[^0-9]/g, "").replace(/^00/, "").replace(/^(3\d{8,9})$/, "39$1");
+        save(K.link, LINK_CLI);
         m.className = "msg ok"; m.textContent = "Listino attivato su questo telefono.";
         setTimeout(function(){ location.reload(); }, 600);
       } else {
@@ -6061,6 +6399,9 @@ function agganciaSchedeDiFabbrica(){
   }
   save("pavpro.allegatifabbrica.v1", giaMessi);
   if(agganciati){ salvaListino(); disegna(); }
+}
+if(CLIENTE){
+  archivioCarica(function(){ disegnaMieiOrdini(); });
 }
 if(!CLIENTE){
   archivioCarica(function(){
