@@ -4133,7 +4133,8 @@ function mandaLink2(cli, m, modo, url, finestra){
   }
   if(modo === "share"){
     if(navigator.share){
-      navigator.share({title:"App Preventivi Pavimenti", text:testoLink(cli, url)}).then(function(){
+      /* testo e indirizzo separati: su iPhone, se l'indirizzo sta dentro al testo, WhatsApp tiene solo quello */
+      navigator.share({title:"Scarica App Design Systems", text:"Scarica App Design Systems", url:url}).then(function(){
         m.className="msg ok"; m.textContent="Link di " + (cli.nome||"questo cliente") + " condiviso.";
       }).catch(function(e){ if(e && e.name === "AbortError"){ m.className="msg"; m.textContent="Condivisione annullata."; } else mandaLink(cli, m, "copia"); });
     } else mandaLink(cli, m, "copia");
