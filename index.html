@@ -241,6 +241,13 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz]{
   border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
 .installa{border-color:var(--accent); background:var(--accent-soft)}
+/* finche' il link personale non e' attivo si vede solo la pagina di attivazione */
+body.attivazione #contenuto > :not(#confermaBox), body.attivazione .wrap > :not(#contenuto):not(#confermaBox){display:none !important}
+body.attivazione #confermaBox{display:block; margin-top:18px; padding:22px 18px}
+body.attivazione #confermaBox h3{font-size:22px; margin:0 0 10px}
+body.attivazione #confermaBox p.corpo{font-size:15px; line-height:1.5}
+body.attivazione #confermaBox input{font-size:18px; padding:12px}
+body.attivazione #confermaBox .btn{font-size:16px; padding:12px 18px}
 .privacybox{margin-top:14px; padding:12px; background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--r); font-size:13px}
 .privacybox label.chk{display:flex; gap:10px; align-items:flex-start; cursor:pointer}
 .privacybox input[type=checkbox]{width:20px; height:20px; flex:0 0 auto; margin-top:1px; accent-color:var(--accent)}
@@ -1259,7 +1266,7 @@ function informativaSezioni(){
     "L\u2019app non usa cookie. Salva nella memoria del browser del tuo telefono (local storage e IndexedDB) solo i dati tecnici necessari a funzionare anche senza rete: listino, scelte fatte, ordini inviati, identificativo del dispositivo. Nessuno di questi serve a tracciarti o a fare statistiche; per questo non \u00e8 previsto un banner per i cookie. Restano sul dispositivo finch\u00e9 non li cancelli dalle impostazioni del browser."
   ]});
   S_.push({t:"Quali dati sono necessari", p:[
-    "Nome e almeno un recapito (WhatsApp o email) sono necessari per ricevere e gestire l\u2019ordine: senza, l\u2019ordine non pu\u00f2 essere inviato. Gli altri campi sono facoltativi.",
+    "Nome, numero WhatsApp ed email sono necessari per ricevere e gestire l\u2019ordine: senza, l\u2019ordine non pu\u00f2 essere inviato. Le note sono facoltative.",
     "L\u2019app e gli ordini sono riservati ad aziende, professionisti e collaboratori di " + nome + "; non \u00e8 destinata a consumatori privati."
   ]});
   S_.push({t:"I tuoi diritti", p:[
@@ -5195,9 +5202,8 @@ function mancanzeOrdine(){
   var m = [];
   if(!String(S.rif||"").trim()) m.push("il nome del cliente");
   if(!(S.privacy && S.privacy.quando)) m.push("la spunta dell'informativa privacy");
-  var mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(S.mail||"").trim()), waOk = !!numeroWa(S.wa);
-  if(!mailOk && !waOk) m.push("almeno un recapito: numero WhatsApp col prefisso o email");
-  else if(String(S.mail||"").trim() && !mailOk) m.push("un'email scritta bene");
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(S.mail||"").trim())) m.push("un'email valida");
+  if(!numeroWa(S.wa)) m.push("il numero WhatsApp col prefisso");
   if(!firmaFatta) m.push("la firma di conferma");
   return m;
 }
@@ -5209,7 +5215,7 @@ function aggiornaInvii(r){
 
   $("titoloRiep").textContent = "Riepilogo dell'ordine";
   ["oblRif","oblWa","oblMail","oblFirma"].forEach(function(id){
-    var el = $(id); el.className = "obbl"; el.textContent = (id === "oblWa" || id === "oblMail") ? "\u2014 almeno uno dei due" : "\u2014 obbligatorio";
+    var el = $(id); el.className = "obbl"; el.textContent = "\u2014 obbligatorio";
   });
   disegnaPrivacy();
   var fs = $("firmaStato");
@@ -6619,6 +6625,13 @@ function testoRifiuto(motivo){
         m.className = "msg err"; m.textContent = testoRifiuto(motivo);
       }
     });
+  }
+  if(LINK_CLI.daConfermare){
+    /* pagina di attivazione: in cima, da sola, finche' il listino non e' attivo */
+    document.body.classList.add("attivazione");
+    var padre = box.parentNode; if(padre && padre.firstChild !== box) padre.insertBefore(box, padre.firstChild);
+    box.querySelector("h3").textContent = "Benvenuto" + (LINK_CLI.nome ? ", " + LINK_CLI.nome : "");
+    box.querySelector("p.corpo").textContent = "Questo \u00e8 il tuo listino personale di " + (AZIENDA.nome || "Design Systems") + ". Per attivarlo scrivi il numero di cellulare a cui \u00e8 stato mandato il link.";
   }
   if(LINK_CLI.daConfermare && LINK_CLI.inAttesa){
     /* riaperta mentre aspetta l'approvazione: si riprende da li' */
