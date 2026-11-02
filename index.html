@@ -401,6 +401,7 @@ i.due em{flex:1 1 50%; min-width:0}
 .tab[aria-selected="true"]{color:var(--fg); border-bottom-color:var(--accent)}
 .foot{font-size:11.5px; color:var(--muted); margin-top:28px; text-align:center}
 .foot.legale{margin-top:6px; line-height:1.5}
+.richiesta{padding:8px 10px; margin:4px 0; border:1px solid var(--accent); background:var(--accent-soft); border-radius:var(--r); font-size:13px; line-height:1.9}
 .foot.legale a, .foot.legale button{color:var(--muted); text-decoration:underline; background:none; border:0; padding:0; font:inherit; cursor:pointer}
 .informativa{font-size:13px; line-height:1.5}
 .informativa h3{font-family:var(--font-display); font-size:14px; margin:12px 0 4px}
@@ -5418,7 +5419,38 @@ function mostraStatoSalvataggio(){
     + " (" + kb(JSON.stringify(m).length) + ").";
 }
 /* le richieste di attivazione in attesa: si chiedono al servizio quando si apre la scheda e ogni 30 secondi */
-var RICHIESTE_TIMER = null;
+var RICHIESTE_TIMER = null, RICHIESTE = [];
+/* le richieste in attesa compaiono anche dentro la scheda del cliente, con Approva / Rifiuta */
+function htmlRichiesta(r, cl){
+  var q = r.quando ? new Date(r.quando) : null;
+  var telCard = cl && cl.tel ? String(cl.tel).replace(/[^0-9]/g, "") : "", telScritto = String(r.tel||"").replace(/[^0-9]/g, "");
+  var stessoNum = telCard && telScritto && (telCard.slice(-9) === telScritto.slice(-9));
+  return '<div class="richiesta"><b>Richiesta di attivazione' + (r.secondo ? ' (secondo browser)' : '') + ':</b> codice <b style="font-family:var(--font-mono);font-size:16px">' + esc(r.codice) + '</b>'
+    + (q ? ' \u00b7 ' + q.toLocaleDateString("it-IT") + ' ' + q.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : '')
+    + (telScritto ? ' \u00b7 numero scritto ' + esc(r.tel) + (telCard ? (stessoNum ? ' \u2713 uguale alla scheda' : ' \u26a0 diverso dalla scheda (' + esc(cl.tel) + ')') : '') : '')
+    + ' <button class="btn small" type="button" data-attok="' + esc(r.id) + '|' + esc(r.device) + '">Approva</button>'
+    + ' <button class="btn sec small" type="button" data-attno="' + esc(r.id) + '|' + esc(r.device) + '">Rifiuta</button></div>';
+}
+function aggiornaRichiesteSchede(){
+  document.querySelectorAll("[data-crich]").forEach(function(el){
+    var id = el.getAttribute("data-crich"), cl = clienti.find(function(x){ return x.id === id; });
+    var mie = RICHIESTE.filter(function(r){ return r.id === id; });
+    el.innerHTML = mie.map(function(r){ return htmlRichiesta(r, cl); }).join("");
+    el.hidden = !mie.length;
+  });
+}
+function rispondiRichiesta(ok, id, device, m){
+  var a = attImpostazioni();
+  m.className = "msg"; m.textContent = ok ? "Approvo\u2026" : "Rifiuto\u2026";
+  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione: ok ? "approva" : "rifiuta", id:id, device:device})})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(j && j.ok){ m.className = "msg ok"; m.textContent = ok ? "Approvato: il listino si attiva sul suo telefono entro pochi secondi." : "Rifiutato: quel telefono non potr\u00e0 usare questo link."; }
+      else { m.className = "msg err"; m.textContent = "Il servizio non ha accettato la richiesta."; }
+      disegnaRichieste();
+    })
+    .catch(function(){ m.className = "msg err"; m.textContent = "Non raggiungo il servizio."; });
+}
 function disegnaRichieste(){
   var a = attImpostazioni(), box = $("richiesteBox"), el = $("richiesteElenco"), m = $("richiesteMsg");
   if(!box) return;
@@ -5428,6 +5460,7 @@ function disegnaRichieste(){
     .then(function(j){
       if(!j || !j.ok){ if(j && j.motivo === "azione"){ box.hidden = true; } return; }
       var l = j.attese || [];
+      RICHIESTE = l; aggiornaRichiesteSchede();
       box.hidden = !l.length;
       $("contaRichieste").textContent = l.length ? "(" + l.length + ")" : "";
       el.innerHTML = l.map(function(r){
@@ -5442,7 +5475,7 @@ function disegnaRichieste(){
           + (telScritto ? ' \u00b7 numero scritto ' + esc(r.tel) + (telCard ? (stessoNum ? ' \u2713 uguale alla scheda' : ' \u26a0 diverso dalla scheda (' + esc(cl.tel) + ')') : '') : '')
           + '</span></div>';
       }).join("");
-      if(l.length && S.gestione && !RICHIESTE_TIMER) RICHIESTE_TIMER = setInterval(function(){ if(document.hidden || !S.gestione) return; disegnaRichieste(); }, 30000);
+      if(S.gestione && !RICHIESTE_TIMER) RICHIESTE_TIMER = setInterval(function(){ if(document.hidden || !S.gestione) return; disegnaRichieste(); }, 30000);
     })
     .catch(function(){});
 }
@@ -5450,16 +5483,7 @@ $("btnRichiesteAgg").addEventListener("click", function(){ disegnaRichieste(); }
 $("richiesteElenco").addEventListener("click", function(e){
   var t = e.target.closest("[data-attok],[data-attno]"); if(!t) return;
   var ok = t.hasAttribute("data-attok"), pa = t.getAttribute(ok ? "data-attok" : "data-attno").split("|");
-  var a = attImpostazioni(), m = $("richiesteMsg");
-  m.className = "msg"; m.textContent = ok ? "Approvo\u2026" : "Rifiuto\u2026";
-  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione: ok ? "approva" : "rifiuta", id:pa[0], device:pa[1]})})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if(j && j.ok){ m.className = "msg ok"; m.textContent = ok ? "Approvato: il listino si attiva sul suo telefono entro pochi secondi." : "Rifiutato."; }
-      else { m.className = "msg err"; m.textContent = "Il servizio non ha accettato la richiesta."; }
-      disegnaRichieste();
-    })
-    .catch(function(){ m.className = "msg err"; m.textContent = "Non raggiungo il servizio."; });
+  rispondiRichiesta(ok, pa[0], pa[1], $("richiesteMsg"));
 });
 $("tabCod").addEventListener("click", function(){
   mostraVista("cod");
@@ -5513,6 +5537,7 @@ function apriPassword(){
       $("btnGest").setAttribute("aria-pressed","true");
       $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false;
       div.remove(); disegna(); disegnaGenSconti(); disegnaSpazio(); disegnaCom();
+      if(typeof disegnaRichieste === "function") disegnaRichieste();
     } else { $("pwInMsg").className="msg err"; $("pwInMsg").textContent="Password sbagliata."; }
   });
   $("pwIn").addEventListener("keydown", function(e){ if(e.key==="Enter") $("pwGo").click(); });
@@ -5683,9 +5708,11 @@ function disegnaClienti(){
         + (c.tel ? " \u00b7 wa " + esc(c.tel) : "") + (c.mail ? " \u00b7 " + esc(c.mail) : "")
         + ' \u00b7 aggiornato il '+new Date(c.aggiornato||c.creato).toLocaleDateString("it-IT")+'</span>'
       + '<span class="cd">'+esc(c.code||"")+'</span>'
+      + '<div class="msg" data-crich="'+esc(c.id)+'" style="flex-basis:100%;margin:4px 0 0" hidden></div>'
       + '<p class="msg" data-cmsg="'+esc(c.id)+'" style="flex-basis:100%;margin:4px 0 0"></p>'
       + '</div>';
   }).join("");
+  if(typeof aggiornaRichiesteSchede === "function") aggiornaRichiesteSchede();
   disegnaBarraCli();
 }
 
@@ -5799,6 +5826,11 @@ function idDalTasto(btn){
 }
 $("elencoClienti").addEventListener("click", function(e){
   var t, m = msgCliente(idDalTasto(e.target.closest("button")));
+  if((t = e.target.closest("[data-attok],[data-attno]"))){
+    var okR = t.hasAttribute("data-attok"), paR = t.getAttribute(okR ? "data-attok" : "data-attno").split("|");
+    rispondiRichiesta(okR, paR[0], paR[1], msgCliente(paR[0]));
+    return;
+  }
   if((t = e.target.closest("[data-cliusa]"))){
     var cu = clienti.find(function(x){ return x.id === t.getAttribute("data-cliusa"); });
     if(cu){
