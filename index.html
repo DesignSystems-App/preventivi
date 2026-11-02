@@ -1311,7 +1311,7 @@ function incluso(c){
    a qualunque versione nuova dell'app e pesano pochi KB invece di uno
    o due megabyte.
    ============================================================ */
-var CAMPI_VOCE = ["nome","role","unita","consumoMq","kgConf","prezzoConf","on","desc","descSolo","link","avviso","nota","colori","fotoTit","pdf","granulo","confs","consumi","finiture","perc"];
+var CAMPI_VOCE = ["nome","role","unita","consumoMq","kgConf","prezzoConf","on","desc","descSolo","link","avviso","nota","colori","fotoTit","pdf","granulo","confs","consumi","finiture","perc","dipende"];
 
 function indiceBase(){
   var gruppi = {}, varianti = {}, voci = {};
@@ -2065,8 +2065,22 @@ function consumiSostituiti(v){
   }
   passata(false);     // prima le tabelle degli altri prodotti
   passata(true);      // poi quella del prodotto stesso, che vince
+  /* consumo che dipende da un'altra voce: il CORPAV dello Spray deck vale 7,5 kg/m²
+     con stencil, rosoni o fasce scelti, 4 kg/m² senza */
+  v.voci.forEach(function(c){
+    if(!c.dipende || !c.dipende.da) return;
+    var rif = v.voci.find(function(x){ return x.uid === c.dipende.da; });
+    if(!rif) return;
+    if(!(incluso(rif) && catalogoScelto(rif))){ ov[c.uid] = Number(c.dipende.senza) || 0; perche[c.uid] = c.dipende.perche || ("senza " + rif.nome); }
+  });
   ov.__perche = perche;
   return ov;
+}
+/* c'e' almeno un modello del catalogo (stencil, rosone, fascia) con una quantita'? */
+function catalogoScelto(c){
+  if(!c.catalogo) return false;
+  var scelte = (S.stencil && S.stencil[c.uid]) || {};
+  return Object.keys(scelte).some(function(id){ return Number(scelte[id]) > 0; });
 }
 /* il consumo imposto dalla granulometria a questo prodotto, se c'e */
 function granuloImpone(c){
@@ -3678,6 +3692,8 @@ $("righe").addEventListener("input", function(e){
     if(!S.stencil[p1[0]]) S.stencil[p1[0]] = {};
     S.stencil[p1[0]][p1[1]] = sq.value;
     salvaSel(); patchRiga(p1[0], "sten");
+    /* i prodotti il cui consumo dipende da questa voce (il CORPAV dello Spray deck) si aggiornano */
+    vociCorrenti().forEach(function(z){ if(z.dipende && z.dipende.da === p1[0]) patchRiga(z.uid, "sten"); });
     return;
   }
 
