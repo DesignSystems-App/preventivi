@@ -613,6 +613,7 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
 function avvia(__D){
 
 var STANDALONE = true;
+var MANUALE_APERTA = false;   /* i tasti "file" dell'app cliente si vedono solo con la strada manuale aperta */
 
 /* RUOLO decide che app è questa.
    "gestione" = la copia che sta sul Mac di SER: si modifica tutto e si genera l'app cliente.
@@ -841,7 +842,7 @@ function scontoDi(cli, gruppoId, nomeProdotto){
    MEMORIA LOCALE
    ============================================================ */
 var K = { listino:"pavpro.listino.v3", pw:"pavpro.pw.v1", cli:"pavpro.cliente.v2", sel:"pavpro.sel.v3",
-          att:"pavpro.att.", avvisi:"pavpro.avvisi.v1", letti:"pavpro.letti.v1",
+          attPre:"pavpro.att.",   /* prefisso dei vecchi allegati in localStorage (att e' il servizio attivazioni, piu' sotto) */ avvisi:"pavpro.avvisi.v1", letti:"pavpro.letti.v1",
            avUrl:"pavpro.avvisiurl.v1", base:"pavpro.sito.v1", remoto:"pavpro.remoto.v1",
            mod:"pavpro.modifiche.v1", modBak:"pavpro.modifiche.backup.v1",
            clienti:"pavpro.clienti.v1", bozzaCli:"pavpro.bozzacliente.v1", azienda:"pavpro.azienda.v1",
@@ -982,10 +983,10 @@ function archivioMigra(){
   try{
     for(var i=0;i<localStorage.length;i++){
       var k = localStorage.key(i);
-      if(k && k.indexOf(K.att)===0) chiavi.push(k);
+      if(k && k.indexOf(K.attPre)===0) chiavi.push(k);
     }
     chiavi.forEach(function(k){
-      var uid = k.slice(K.att.length), v = localStorage.getItem(k);
+      var uid = k.slice(K.attPre.length), v = localStorage.getItem(k);
       if(v){ if(!(uid in ATT)) ATT[uid] = v; archivioScrivi(uid, ATT[uid]); }
       localStorage.removeItem(k);
     });
@@ -1006,7 +1007,7 @@ function allegatoFabbrica(uid){
 /* la scheda caricata a mano su questo dispositivo, se c'e' (senza quelle di fabbrica) */
 function attProprio(uid){
   if(ATT[uid]) return ATT[uid];
-  try{ return localStorage.getItem(K.att+uid) || null; }catch(e){ return null; }
+  try{ return localStorage.getItem(K.attPre+uid) || null; }catch(e){ return null; }
 }
 function eRemoto(src){ return false; }   // le schede sul sito dell'app si vedono dentro l'app
 /* un allegato puo' essere un data: (file dentro la memoria) o un percorso
@@ -1024,17 +1025,17 @@ function attGet(uid){
   fab = fab ? (fab.dati || fab.file || null) : null;
   if(CLIENTE) return (ALLEGATI && ALLEGATI[uid]) || fab;   // nell'app cliente i PDF arrivano coi dati
   if(ATT[uid]) return ATT[uid];
-  try{ return localStorage.getItem(K.att+uid) || fab; }catch(e){ return fab; }
+  try{ return localStorage.getItem(K.attPre+uid) || fab; }catch(e){ return fab; }
 }
 function attSet(uid, dataUrl){
   ATT[uid] = dataUrl;
   if(ATT_DB || !ATT_PRONTO){ archivioScrivi(uid, dataUrl); return true; }   // archivio grande, o in coda finche' apre
-  try{ localStorage.setItem(K.att+uid, dataUrl); return true; }catch(e){ return false; }   // senza archivio: come prima
+  try{ localStorage.setItem(K.attPre+uid, dataUrl); return true; }catch(e){ return false; }   // senza archivio: come prima
 }
 function attDel(uid){
   delete ATT[uid];
   archivioScrivi(uid, null);
-  drop(K.att+uid);
+  drop(K.attPre+uid);
 }
 function attTutti(){
   var out = {};
@@ -1043,7 +1044,7 @@ function attTutti(){
   try{
     for(var i=0;i<localStorage.length;i++){
       var k = localStorage.key(i);
-      if(k && k.indexOf(K.att)===0 && !out[k.slice(K.att.length)]) out[k.slice(K.att.length)] = localStorage.getItem(k);
+      if(k && k.indexOf(K.attPre)===0 && !out[k.slice(K.attPre.length)]) out[k.slice(K.attPre.length)] = localStorage.getItem(k);
     }
   }catch(e){}
   return out;
@@ -4065,10 +4066,24 @@ function testoLink(cli, url){
     + "\n\nSi apre dal telefono con un tocco, senza installare niente. Per averla sempre a portata di mano: in Safari o Chrome tocca Condividi \u2192 Aggiungi alla schermata Home."
     + "\n\nPer qualunque cosa scrivimi qui.";
 }
-function mandaLink(cli, m, copiaSolo){
-  var url = linkCliente(cli);
-  if(!url){ m.className="msg err"; m.textContent="Prima metti l\u2019indirizzo della cartella dell\u2019app sul sito (scheda Comunicazioni \u2192 Listino che si aggiorna da solo), poi carica l\u00ec index.html, dati.json e avvisi.json."; return; }
+function mandaLink(cli, m, modo){
+  var url = linkCliente(cli), copiaSolo = (modo === true || modo === "copia");
+  if(!url){ m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso): il link personale si costruisce sull\u2019indirizzo del sito."; return; }
   if(!cli.code){ m.className="msg err"; m.textContent="Questo cliente non ha un codice: salvalo di nuovo."; return; }
+  if(modo === "mail"){
+    var dest = String(cli.mail || "").trim();
+    window.location.href = "mailto:" + encodeURIComponent(dest) + "?subject=" + encodeURIComponent("La tua app Preventivi Pavimenti") + "&body=" + encodeURIComponent(testoLink(cli, url));
+    m.className="msg ok"; m.textContent = "Email aperta" + (dest ? " per " + dest : " (sulla sua scheda non c\u2019\u00e8 l\u2019email: scrivi tu il destinatario)") + " col link personale di " + (cli.nome||"questo cliente") + ": premi Invia. Dal telefono il link si apre con un tocco, senza file da scaricare.";
+    return;
+  }
+  if(modo === "share"){
+    if(navigator.share){
+      navigator.share({title:"App Preventivi Pavimenti", text:testoLink(cli, url)}).then(function(){
+        m.className="msg ok"; m.textContent="Link di " + (cli.nome||"questo cliente") + " condiviso.";
+      }).catch(function(e){ if(e && e.name === "AbortError"){ m.className="msg"; m.textContent="Condivisione annullata."; } else mandaLink(cli, m, "copia"); });
+    } else mandaLink(cli, m, "copia");
+    return;
+  }
   if(copiaSolo){
     var fatto = function(){ m.className="msg ok"; m.textContent="Link di " + (cli.nome||"questo cliente") + " copiato (" + url.length + " caratteri): incollalo dove vuoi."; };
     if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(fatto).catch(function(){ m.className="msg"; m.textContent=url; });
@@ -4867,8 +4882,13 @@ function registraOrdine(poi){
   if(!u){ locale(); return; }
   fetch(u + "/ordine", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(dati)})
     .then(function(x){ return x.json(); })
-    .then(function(j){ if(j && j.ok && j.numero) poi(j.numero, true); else locale(); })
+    .then(function(j){ if(j && j.ok && j.numero) poi(j.numero, true, j.chiave || ""); else locale(); })
     .catch(function(){ locale(); });
+}
+/* il link segreto al PDF firmato sul servizio: chi lo tocca (ufficio, cliente) apre il PDF */
+function linkPdfOrdine(){
+  var u = urlAttivazioni();
+  return (u && ORD_CORRENTE && ORD_CORRENTE.dalServizio && ORD_CORRENTE.chiave) ? u + "/o/" + ORD_CORRENTE.numero + "/" + ORD_CORRENTE.chiave : "";
 }
 function mandaPdfAlServizio(numero, b64){
   var u = urlAttivazioni(); if(!u) return;
@@ -4927,10 +4947,9 @@ document.addEventListener("click", function(e){
    completo per email. via = "tutti" (un gesto, prima WhatsApp poi l'email),
    "wa" o "mail" da soli. */
 function mandaOrdinePdf(via, m){
-  if(via === "mail"){ apriCanale("mail", testoRiepilogo()); m.className="msg ok"; m.textContent="Email con l\u2019ordine completo aperta: premi Invia."; return; }
   m.className = "msg"; m.textContent = "Registro l\u2019ordine e preparo il PDF\u2026";
-  registraOrdine(function(numero, dalServizio){
-    ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio};
+  registraOrdine(function(numero, dalServizio, chiave){
+    ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio, chiave:chiave||""};
     mandaOrdinePdf2(via, m);
   });
 }
@@ -4943,24 +4962,38 @@ function mandaOrdinePdf2(via, m){
     if(ORD_CORRENTE.dalServizio) mandaPdfAlServizio(ORD_CORRENTE.numero, b64);
     disegnaMieiOrdini();
   });
-  var breve = "Ordine n. " + ORD_CORRENTE.numero + " di " + (S.rif || "cliente") + " per " + (AZIENDA.nome || "Design Systems") + " \u2014 il dettaglio \u00e8 nel PDF allegato.";
-  var poiEmail = (via === "tutti") ? function(){ setTimeout(function(){ apriCanale("mail", "Ordine n. " + ORD_CORRENTE.numero + "\n\n" + testoRiepilogo()); }, 900); } : function(){};
+  var lk = linkPdfOrdine(), intest = "Ordine n. " + ORD_CORRENTE.numero + " di " + (S.rif || "cliente") + " per " + (AZIENDA.nome || "Design Systems");
+  /* il messaggio breve per WhatsApp: col link al PDF firmato quando il servizio c'e' */
+  var breve = intest + (lk ? "\nPDF firmato: " + lk : " \u2014 il dettaglio \u00e8 nel PDF allegato.");
+  var testoMail = "Ordine n. " + ORD_CORRENTE.numero + (lk ? "\nPDF firmato: " + lk : "") + "\n\n" + testoRiepilogo();
+  if(via === "mail"){
+    apriCanale("mail", testoMail);
+    m.className="msg ok"; m.textContent="Ordine n. " + ORD_CORRENTE.numero + " registrato. Email aperta con l\u2019ordine completo" + (lk ? " e il link al PDF firmato" : "") + ": premi Invia.";
+    return;
+  }
+  var poiEmail = (via === "tutti") ? function(){ setTimeout(function(){ apriCanale("mail", testoMail); }, 900); } : function(){};
+  function senzaFoglio(){
+    /* niente foglio di condivisione: WhatsApp col testo e il link al PDF; senza servizio, il PDF si scarica e va allegato a mano */
+    if(!lk) scaricaBlob(blob, nome);
+    apriCanale("wa", breve);
+    m.className="msg ok"; m.textContent = lk
+      ? "WhatsApp aperto con l\u2019ordine n. " + ORD_CORRENTE.numero + " e il link al PDF firmato: premi Invia." + (via==="tutti" ? " Poi si apre anche l\u2019email." : "")
+      : "PDF scaricato (" + kb(blob.size) + "): allegalo al messaggio WhatsApp che si \u00e8 aperto." + (via==="tutti" ? " Poi si apre anche l\u2019email." : "");
+    poiEmail();
+  }
   var file = null; try{ file = new File([blob], nome, {type:"application/pdf"}); }catch(e){}
   if(file && navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
-    navigator.share({files:[file], title:"Ordine " + (S.rif||""), text:breve}).then(function(){
-      m.className="msg ok"; m.textContent="PDF dell\u2019ordine mandato su WhatsApp." + (via==="tutti" ? " Ora si apre l\u2019email con l\u2019ordine completo: premi Invia." : "");
+    /* solo il file, senza testo: su iPhone WhatsApp prende il testo e lascia indietro il PDF quando ci sono tutti e due */
+    navigator.share({files:[file], title:intest}).then(function(){
+      m.className="msg ok"; m.textContent="PDF dell\u2019ordine n. " + ORD_CORRENTE.numero + " condiviso." + (via==="tutti" ? " Ora si apre l\u2019email con l\u2019ordine completo: premi Invia." : "");
       poiEmail();
     }).catch(function(e){
-      if(e && e.name === "AbortError"){ m.className="msg"; m.textContent="Invio annullato."; return; }
-      scaricaBlob(blob, nome); apriCanale("wa", breve);
-      m.className="msg"; m.textContent="Il PDF \u00e8 stato scaricato: allegalo al messaggio WhatsApp.";
-      poiEmail();
+      if(e && e.name === "AbortError"){ m.className="msg"; m.textContent="Invio annullato: l\u2019ordine n. " + ORD_CORRENTE.numero + " resta registrato, puoi rimandarlo."; return; }
+      senzaFoglio();
     });
     return;
   }
-  scaricaBlob(blob, nome); apriCanale("wa", breve);
-  m.className="msg ok"; m.textContent="PDF dell\u2019ordine scaricato (" + kb(blob.size) + "): allegalo al messaggio WhatsApp che si \u00e8 aperto." + (via==="tutti" ? " Poi si apre anche l\u2019email con l\u2019ordine completo." : "");
-  poiEmail();
+  senzaFoglio();
 }
 function scaricaBlob(blob, nome){
   var url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -5394,6 +5427,8 @@ function disegnaClienti(){
         + '<button class="btn sec small" type="button" data-cliordini="'+esc(c.id)+'">I suoi ordini</button>'
         + '<button class="btn sec small" type="button" data-cliapri="'+esc(c.id)+'">Apri la sua app</button>'
         + '<button class="btn sec small" type="button" data-clilink="'+esc(c.id)+'">Link su WhatsApp</button>'
+        + '<button class="btn sec small" type="button" data-climaillink="'+esc(c.id)+'">Link per email</button>'
+        + (navigator.share ? '<button class="btn sec small" type="button" data-clisharelink="'+esc(c.id)+'">Condividi il link\u2026</button>' : '')
         + '<button class="btn sec small" type="button" data-clicopialink="'+esc(c.id)+'">Copia il link</button>'
         + '<button class="btn sec small" type="button" data-cliprezzi="'+esc(c.id)+'">Prezzi suoi</button>'
         + '<button class="btn sec small" type="button" data-climod="'+esc(c.id)+'">Modifica</button>'
@@ -5404,10 +5439,10 @@ function disegnaClienti(){
           + '<button class="btn sec small" type="button" data-cliusa="'+esc(c.id)+'">Usa i suoi sconti</button>'
           + '<button class="btn sec small" type="button" data-clicopia="'+esc(c.id)+'">Copia codice</button>'
           + '<button class="btn sec small" type="button" data-cliriusa="'+esc(c.id)+'">Riusa per un altro</button>'
-          + '<button class="btn sec small" type="button" data-cliapp="'+esc(c.id)+'">Genera la sua app (file)</button>'
+          + (MANUALE_APERTA ? '<button class="btn sec small" type="button" data-cliapp="'+esc(c.id)+'">Genera la sua app (file)</button>'
           + '<button class="btn sec small" type="button" data-cliwa="'+esc(c.id)+'">File su WhatsApp</button>'
           + '<button class="btn sec small" type="button" data-climail="'+esc(c.id)+'">File per email</button>'
-          + (navigator.share && navigator.canShare ? '<button class="btn sec small" type="button" data-clishare="'+esc(c.id)+'">Condividi\u2026</button>' : '')
+          + (navigator.share && navigator.canShare ? '<button class="btn sec small" type="button" data-clishare="'+esc(c.id)+'">Condividi il file\u2026</button>' : '') : '')
           + '<button class="btn sec small" type="button" data-clidel="'+esc(c.id)+'">Elimina</button>'
         + '</span></details>'
       + '</span>'
@@ -5566,10 +5601,10 @@ $("elencoClienti").addEventListener("click", function(e){
     }
     return;
   }
-  if((t = e.target.closest("[data-clilink],[data-clicopialink]"))){
-    var copia = t.hasAttribute("data-clicopialink");
-    var cl = clienti.find(function(x){ return x.id === t.getAttribute(copia ? "data-clicopialink" : "data-clilink"); });
-    if(cl) mandaLink(cl, m, copia);
+  if((t = e.target.closest("[data-clilink],[data-clicopialink],[data-climaillink],[data-clisharelink]"))){
+    var modo = t.hasAttribute("data-clicopialink") ? "copia" : t.hasAttribute("data-climaillink") ? "mail" : t.hasAttribute("data-clisharelink") ? "share" : "wa";
+    var cl = clienti.find(function(x){ return x.id === t.getAttribute({copia:"data-clicopialink", mail:"data-climaillink", share:"data-clisharelink", wa:"data-clilink"}[modo]); });
+    if(cl) mandaLink(cl, m, modo);
     return;
   }
   if((t = e.target.closest("[data-cliwa],[data-climail],[data-clishare]"))){
@@ -6047,6 +6082,7 @@ function linkSitoGh(){
     var ap = document.querySelector(".card.manuale").hidden;
     document.querySelectorAll(".card.manuale").forEach(function(c){ c.hidden = !ap; });
     b.textContent = ap ? "Nascondi la strada manuale" : "Mostra la strada manuale (sito proprio)";
+    MANUALE_APERTA = ap; if(typeof disegnaClienti === "function") disegnaClienti();
   });
   /* l'indirizzo di prova di avvisi.js, rimasto dai test, non deve finire nelle app */
   if(!CLIENTE && /cementostampato\.it\/app\/avvisi\.js/.test(load(K.avUrl, ""))){ drop(K.avUrl); }
@@ -6191,7 +6227,8 @@ function disegnaOrdiniRicevuti(filtro){
       box.innerHTML = l.map(function(o){
         var q = o.quando ? new Date(o.quando) : null;
         return '<div class="cliente"><span class="nm">Ordine n. ' + esc(o.numero) + ' \u00b7 ' + esc((o.cliente && o.cliente.nome) || "(senza nome)") + '</span>'
-          + '<span class="az"><button class="btn sec small" type="button" data-ordadm="' + esc(o.numero) + '"' + (o.pdf ? '' : ' disabled') + '>PDF firmato</button></span>'
+          + '<span class="az"><button class="btn sec small" type="button" data-ordadm="' + esc(o.numero) + '"' + (o.pdf ? '' : ' disabled') + '>PDF firmato</button>'
+          + '<button class="btn sec small" type="button" data-orddel="' + esc(o.numero) + '">Elimina</button></span>'
           + '<span class="dt">' + (q ? q.toLocaleDateString("it-IT") + " " + q.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : "") + ' \u00b7 ' + esc(o.sistema||"") + ' \u00b7 ' + N(o.mq||0) + ' m\u00b2 \u00b7 imponibile ' + E(o.imponibile||0) + ' \u00b7 <b>totale ' + E(o.totale||0) + '</b>'
           + ((o.cliente && (o.cliente.tel || o.cliente.mail)) ? ' \u00b7 ' + esc([o.cliente.tel, o.cliente.mail].filter(Boolean).join(" \u00b7 ")) : '') + '</span></div>';
       }).join("");
@@ -6201,6 +6238,21 @@ function disegnaOrdiniRicevuti(filtro){
 $("btnOrdiniAgg").addEventListener("click", function(){ disegnaOrdiniRicevuti(); });
 $("btnOrdiniTutti").addEventListener("click", function(){ disegnaOrdiniRicevuti(null); });
 $("elencoOrdini").addEventListener("click", function(e){
+  var td = e.target.closest("[data-orddel]");
+  if(td){
+    var nd = td.getAttribute("data-orddel"), md = $("ordiniMsg"), ad = attImpostazioni();
+    attendiConferma(td, "Elimino?", function(){
+      md.className = "msg"; md.textContent = "Cancello l\u2019ordine " + nd + " dal servizio\u2026";
+      fetch(ad.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:ad.chiave, azione:"cancellaOrdine", numero:nd})})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if(j && j.ok){ md.className="msg ok"; md.textContent="Ordine " + nd + " cancellato (dati e PDF). Il numero non viene riassegnato."; disegnaOrdiniRicevuti(); }
+          else { md.className="msg err"; md.textContent = (j && j.motivo === "azione") ? "Il servizio \u00e8 ancora alla versione 2: incolla la versione 3 del Worker su Cloudflare." : "Il servizio non ha cancellato l\u2019ordine."; }
+        })
+        .catch(function(){ md.className="msg err"; md.textContent="Non raggiungo il servizio."; });
+    });
+    return;
+  }
   var t = e.target.closest("[data-ordadm]"); if(!t) return;
   var a = attImpostazioni(), n = t.getAttribute("data-ordadm"), m = $("ordiniMsg");
   m.className = "msg"; m.textContent = "Scarico il PDF dell\u2019ordine " + n + "\u2026";
