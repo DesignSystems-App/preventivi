@@ -1484,21 +1484,20 @@ function applicaModifiche(base, m){
      1/4 mm, 0,90 con 4/8 mm, mano a rullo 0,45 sempre. Niente piu' "per sacco", e i
      modi "1/4" / "4/8" aggiunti a mano in gestione lasciano il posto a quello automatico. */
   base.gruppi.forEach(function(g){ g.varianti.forEach(function(v){ v.voci.forEach(function(c){
-    if((c.uid === "sr1b" || c.uid === "sr2b") && Array.isArray(c.consumi) && c.consumi.length){
-      if(c.consumi.some(function(z){ return /1\/4|4\/8/.test(String(z.nome||"")); })){
-        c.consumi = [{id:c.uid+"imp", nome:"Per impasto", v:0.9, gran:true},{id:c.uid+"rul", nome:"Mano a rullo", v:0.45}];
-        c.consumoMq = 0.9;
-      } else if(c.consumi.every(function(z){ return z.gran === undefined; })){
-        var qualcuno = false;
-        c.consumi.forEach(function(z){ if(/impasto/i.test(String(z.nome||""))){ z.gran = true; qualcuno = true; } });
-        if(!qualcuno) c.consumi[0].gran = true;
-      }
+    if((c.uid === "sr1b" || c.uid === "sr2b") && Array.isArray(c.consumi)){
+      /* i modi sono numeri fissi scelti dal cliente: via il "segue il ghiaino" */
+      c.consumi.forEach(function(z){ delete z.gran; });
+      if(!c.consumi.some(function(z){ return /1\/4/.test(String(z.nome||"")); })) c.consumi.push({id:c.uid+"imp14", nome:"Per impasto 1/4 mm", v:1});
+      c.consumi.forEach(function(z){ if(/^per impasto$/i.test(String(z.nome||"").trim())) z.nome = "Per impasto 4/8 mm"; });
     }
     if((c.uid === "sr1c" || c.uid === "sr2c") && c.granulo){
-      c.granulo.perSacco = {};
-      if(!c.granulo.consumi) c.granulo.consumi = {};
-      var ur = c.uid === "sr1c" ? "sr1b" : "sr2b";
-      if(!c.granulo.consumi[ur]) c.granulo.consumi[ur] = {"1/4 mm":1, "4/8 mm":0.9};
+      /* la granulometria del ghiaino non comanda piu' nessun consumo */
+      delete c.granulo.consumi; delete c.granulo.perSacco;
+    }
+    /* il ghiaino sta subito sotto al DS-REMUK, poi cornici e rosoni */
+    if(c.uid === "sr1c" || c.uid === "sr2c"){
+      var ib = v.voci.findIndex(function(z){ return z.uid === (c.uid === "sr1c" ? "sr1b" : "sr2b"); }), ic = v.voci.indexOf(c);
+      if(ib >= 0 && ic !== ib + 1){ v.voci.splice(ic, 1); v.voci.splice(ib + (ic < ib ? 0 : 1), 0, c); }
     }
   }); }); });
   return base;
@@ -3000,7 +2999,7 @@ function disegnaRighe(r){
     }
 
     var granScelta = S.granulo[c.uid] || "";
-    var granu = (c.granulo && c.granulo.opzioni && c.granulo.opzioni.length)
+    var granu = (c.granulo && c.granulo.opzioni && c.granulo.opzioni.length && !modoPercentuale(c))   /* col ghiaino la grana si sceglie colore per colore, qui sotto */
       ? '<div class="granu"><span class="colscelto">'
         + (granScelta ? 'Granulometria: <b>'+esc(granScelta)+'</b>' : 'Scegli la granulometria')
         + '</span>'
