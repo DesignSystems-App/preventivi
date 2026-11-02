@@ -1021,6 +1021,8 @@ function urlAllegato(v){
   return b ? b + v : "";                                // dal Mac o dal file: serve l'indirizzo del sito
 }
 function attGet(uid){
+  var lk = (typeof listino === "object" && listino && Array.isArray(listino.collegamenti)) ? listino.collegamenti.find(function(x){ return x.uid === uid; }) : null;
+  if(lk && !ATT[uid] && !(CLIENTE && ALLEGATI && ALLEGATI[uid])) uid = lk.da;   // copia collegata: la scheda e' quella dell'originale
   var fab = allegatoFabbrica(uid);
   fab = fab ? (fab.dati || fab.file || null) : null;
   if(CLIENTE) return (ALLEGATI && ALLEGATI[uid]) || fab;   // nell'app cliente i PDF arrivano coi dati
@@ -1339,6 +1341,10 @@ function calcolaModifiche(){
   var m = { v:1, gruppi:{}, varianti:{}, voci:{}, catalogo:{},
             nuoviGruppi:[], nuoveVoci:[], rimossi:{gruppi:[], voci:[]}, quando:new Date().toISOString() };
   var vistiG = {}, vistiC = {};
+  /* i collegamenti validi: l'originale e la copia esistono ancora */
+  var presenti = {}; scorriVoci(listinoGenerale(), function(c){ presenti[c.uid] = 1; });
+  m.collegamenti = (listinoGenerale().collegamenti || []).filter(function(l){ return presenti[l.da] && presenti[l.uid]; }).map(function(l){ return {da:l.da, uid:l.uid, g:l.g, on:{}}; });
+  var copie = {}; m.collegamenti.forEach(function(l){ copie[l.uid] = l; });
 
   listinoGenerale().gruppi.forEach(function(g){
     var gb = B.gruppi[g.id];
@@ -1353,6 +1359,7 @@ function calcolaModifiche(){
       if(vb && !uguali(v.nome, vb.nome)) m.varianti[g.id+"|"+v.id] = {nome:v.nome};
       (v.voci||[]).forEach(function(c){
         var cb = B.voci[c.uid];
+        if(!cb && copie[c.uid]){ copie[c.uid].on[v.id] = !!c.on; return; }   // copia collegata: si ricostruisce dall'originale
         if(!cb){ m.nuoveVoci.push({g:g.id, v:v.id, voce:clone(c)}); return; }
         vistiC[c.uid] = 1;
         var dc = {};
@@ -1476,6 +1483,20 @@ function applicaModifiche(base, m){
     var g = base.gruppi.find(function(x){ return x.id === n.g; });
     var v = g && g.varianti.find(function(x){ return x.id === n.v; });
     if(v && !v.voci.some(function(c){ return c.uid === n.voce.uid; })) v.voci.push(n.voce);
+  });
+  /* le copie collegate si ricostruiscono dall'originale (gia' con le modifiche sopra) */
+  base.collegamenti = [];
+  (m.collegamenti||[]).forEach(function(l){
+    var src = null; scorriVoci(base, function(c){ if(!src && c.uid === l.da) src = c; });
+    var g = base.gruppi.find(function(x){ return x.id === l.g; });
+    if(!src || !g) return;
+    (g.varianti||[]).forEach(function(v){
+      if(v.voci.some(function(c){ return c.uid === l.uid; })) return;
+      var n = copiaCollegata(src, l.uid);
+      if(l.on && l.on[v.id] !== undefined) n.on = !!l.on[v.id];
+      v.voci.push(n);
+    });
+    base.collegamenti.push({da:l.da, uid:l.uid, g:l.g, on:l.on||{}});
   });
   (m.nuoviGruppi||[]).forEach(function(g){
     if(!base.gruppi.some(function(x){ return x.id === g.id; })) base.gruppi.push(g);
@@ -1825,6 +1846,7 @@ function salvaListino(){
   aggiornaElencoProdotti(listinoGenerale());   // un prodotto nuovo entra subito negli sconti per prodotto
   if(cliListino){ salvaVociCliente(); return; }   // stiamo sul listino di un cliente
   sincronizzaGemelli();
+  sincronizzaCollegati();
   var m = calcolaModifiche();
   var testo = JSON.stringify(m);
   var ok = save(K.mod, m);
@@ -1889,6 +1911,73 @@ function numIt(v){
 function N(v){ return (v===null||v===undefined||isNaN(v)) ? "—" : num.format(v); }
 
 function gruppoCorrente(){ return listino.gruppi.find(function(g){ return g.id===S.gruppo; }) || listino.gruppi[0]; }
+/* ---- prodotti collegati fra sistemi ----
+   listino.collegamenti = [{da:uidOriginale, uid:uidDellaCopia, g:idSistema, on:{idScheda:true/false}}]
+   La copia vive nel sistema g (tutte le schede) con un uid suo, ma e' lo stesso
+   prodotto: ad ogni salvataggio i dati si riallineano, e al caricamento la copia
+   viene ricostruita dall'originale. */
+function collegamenti(){ var l = listinoGenerale(); if(!Array.isArray(l.collegamenti)) l.collegamenti = []; return l.collegamenti; }
+function collegatoDa(uid){ var l = collegamenti().find(function(x){ return x.uid === uid; }); return l ? l.da : null; }
+function nomeGruppo(id){ var g = listinoGenerale().gruppi.find(function(x){ return x.id === id; }); return g ? g.nome : id; }
+function testoCollegamenti(c){
+  var orig = collegatoDa(c.uid) || c.uid, righe = [];
+  if(orig !== c.uid){
+    var gOrig = null; listinoGenerale().gruppi.forEach(function(g2){ (g2.varianti||[]).forEach(function(v2){ if((v2.voci||[]).some(function(z){ return z.uid === orig; })) gOrig = g2; }); });
+    righe.push("\u00c8 lo stesso prodotto di <b>" + esc(gOrig ? gOrig.nome : "un altro sistema") + "</b>.");
+  }
+  var altri = collegamenti().filter(function(x){ return x.da === orig && x.uid !== c.uid; });
+  if(altri.length) righe.push("Sta anche in: " + altri.map(function(x){ return '<b>' + esc(nomeGruppo(x.g)) + '</b> <button class="btn sec small" type="button" data-scollega="'+esc(x.uid)+'" title="Togli da '+esc(nomeGruppo(x.g))+'">\u00d7</button>'; }).join(", ") + ".");
+  return righe.length ? '<p class="hint" style="margin:6px 0 0">' + righe.join(" ") + '</p>' : "";
+}
+function collegaProdotto(uid, gId){
+  if(cliListino){ avvisa("I collegamenti si fanno sul listino generale, non su quello di un cliente."); return; }
+  var orig = collegatoDa(uid) || uid, src = null;
+  scorriVoci(listinoGenerale(), function(c){ if(!src && c.uid === orig) src = c; });
+  var g = listinoGenerale().gruppi.find(function(x){ return x.id === gId; });
+  if(!src || !g) return;
+  if(collegamenti().some(function(x){ return x.da === orig && x.g === gId; })){ avvisa(src.nome + " sta gi\u00e0 in " + g.nome + "."); return; }
+  var nuova = copiaCollegata(src, uidNuovo());
+  (g.varianti||[]).forEach(function(v){ if(!(v.voci||[]).some(function(z){ return z.uid === nuova.uid; })) v.voci.push(clone(nuova)); });
+  collegamenti().push({da:orig, uid:nuova.uid, g:gId, on:{}});
+  salvaListino(); disegna();
+  var mm = $("copyMsg"); mm.className = "msg ok";
+  mm.textContent = src.nome + " ora sta anche in " + g.nome + (g.varianti.length > 1 ? " (tutte e " + g.varianti.length + " le schede)" : "") + ", collegato: quello che cambi qui vale anche l\u00ec.";
+  mm.dataset.tenere = "1"; setTimeout(function(){ mm.dataset.tenere = ""; }, 8000);
+}
+function scollegaProdotto(uidCopia){
+  var l = collegamenti(), k = l.findIndex(function(x){ return x.uid === uidCopia; });
+  if(k < 0) return;
+  var lk = l[k]; l.splice(k, 1);
+  listinoGenerale().gruppi.forEach(function(g2){ (g2.varianti||[]).forEach(function(v2){ v2.voci = (v2.voci||[]).filter(function(z){ return z.uid !== uidCopia; }); }); });
+  salvaListino(); disegna();
+  var mm = $("copyMsg"); mm.className = "msg ok"; mm.textContent = "Tolto da " + nomeGruppo(lk.g) + ".";
+}
+/* la copia: stesso prodotto, uid suo; i legami interni all'altro sistema non viaggiano */
+function copiaCollegata(src, uid){
+  var n = clone(src); n.uid = uid;
+  delete n.perc; delete n.dipende;
+  if(n.granulo) delete n.granulo.consumi;
+  return n;
+}
+/* ad ogni salvataggio originale e copie si riallineano: comanda quello del sistema su cui si lavora */
+function sincronizzaCollegati(){
+  var L = listinoGenerale(), links = collegamenti();
+  if(!links.length) return;
+  var gCur = gruppoCorrente();
+  function trova(uid){ var out = []; L.gruppi.forEach(function(g2){ (g2.varianti||[]).forEach(function(v2){ (v2.voci||[]).forEach(function(z, i){ if(z.uid === uid) out.push({g:g2, v:v2, i:i, c:z}); }); }); }); return out; }
+  links.forEach(function(lk){
+    var orig = trova(lk.da), copie = trova(lk.uid);
+    if(!orig.length || !copie.length) return;
+    var fonte = (copie.some(function(o){ return o.g === gCur; }) ? copie.filter(function(o){ return o.g === gCur; })[0] : orig[0]).c;
+    orig.concat(copie).forEach(function(o){
+      if(o.c === fonte) return;
+      var n = copiaCollegata(fonte, o.c.uid);
+      n.on = o.c.on;
+      if(o.c.uid === lk.da){ if(fonte.perc === undefined && o.c.perc) n.perc = o.c.perc; if(o.c.dipende) n.dipende = o.c.dipende; if(o.c.granulo && o.c.granulo.consumi && n.granulo) n.granulo.consumi = o.c.granulo.consumi; }
+      o.v.voci[o.i] = n;
+    });
+  });
+}
 function varianteCorrente(){ var g=gruppoCorrente(); return g.varianti.find(function(v){ return v.id===S.variante; }) || g.varianti[0]; }
 function chiavePz(uid){ return S.gruppo+"|"+S.variante+"|"+uid; }
 /* ---- varianti di confezione e di consumo ----
@@ -2897,7 +2986,16 @@ function disegnaRighe(r){
       + granuloEdit(c)
       + (cliListino
           ? '<p class="msg err full" style="margin:0">Per '+esc((clienteListino()||{}).nome||"questo cliente")+' cambi solo i prezzi: confezioni, consumi, nomi e descrizioni sono quelli del listino generale, uguali per tutti.</p>'
-          : '<div class="full"><button class="btn sec small" type="button" data-del="'+esc(c.uid)+'">Elimina questa voce</button></div>')
+          : '<div class="full collega">'
+            + '<label class="l">Metti questo prodotto anche in un altro sistema</label>'
+            + '<div class="btnrow" style="margin-top:4px"><select data-colsis="'+esc(c.uid)+'"><option value="">\u2014 scegli il sistema \u2014</option>'
+            + listinoGenerale().gruppi.filter(function(g2){ return g2.id !== gruppoCorrente().id && !(g2.varianti||[]).some(function(v2){ return (v2.voci||[]).some(function(z){ return z.uid === c.uid || collegatoDa(z.uid) === c.uid || (collegatoDa(c.uid) && (z.uid === collegatoDa(c.uid) || collegatoDa(z.uid) === collegatoDa(c.uid))); }); }); })
+                .map(function(g2){ return '<option value="'+esc(g2.id)+'">'+esc(g2.nome)+'</option>'; }).join("")
+            + '</select><button class="btn sec small" type="button" data-collega="'+esc(c.uid)+'">Collega</button></div>'
+            + testoCollegamenti(c)
+            + '<p class="hint" style="margin:4px 0 0">Collegato vuol dire lo stesso prodotto: prezzo, consumo, confezioni e descrizione cambiano insieme ovunque; la spunta resta di ogni scheda.</p>'
+            + '<div style="margin-top:8px"><button class="btn sec small" type="button" data-del="'+esc(c.uid)+'">Elimina questa voce</button></div>'
+            + '</div>')
       + '</div>') : "";
 
     var sceltiK = coloriScelti(c), nomiK = sceltiK.map(function(k){ return k.n; });
@@ -3506,10 +3604,23 @@ $("righe").addEventListener("click", function(e){
     S.pz[chiavePz(u4)] = Math.max(0, cur + d);
     disegna(); return;
   }
+  if((t = e.target.closest("[data-collega]"))){
+    var uc = t.getAttribute("data-collega"), selc = document.querySelector('[data-colsis="'+uc+'"]');
+    if(!selc || !selc.value){ avvisa("Scegli prima il sistema."); return; }
+    collegaProdotto(uc, selc.value);
+    return;
+  }
+  if((t = e.target.closest("[data-scollega]"))){
+    attendiConferma(t, "Tolgo?", function(){ scollegaProdotto(t.getAttribute("data-scollega")); });
+    return;
+  }
   if((t = e.target.closest("[data-del]"))){
     var u5 = t.getAttribute("data-del");
     var arr = vociCorrenti(), k = arr.findIndex(function(c){ return c.uid===u5; });
-    if(k>=0){ attDel(u5); arr.splice(k,1); salvaListino(); disegna(); disegnaSpazio(); }
+    if(k>=0){
+      if(collegatoDa(u5)){ scollegaProdotto(u5); disegnaSpazio(); return; }
+      attDel(u5); arr.splice(k,1); salvaListino(); disegna(); disegnaSpazio();
+    }
     return;
   }
 });
@@ -4014,7 +4125,7 @@ function costruisciApp(cli){
     perClienti.gruppi = perClienti.gruppi.filter(function(g){ return !g.bozza; });
     if(!perClienti.gruppi.length) throw new Error("sono tutti in bozza: non c'\u00e8 niente da mandare");
     var usati = {};
-    perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; }); }); });
+    perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; var lk = (perClienti.collegamenti||[]).find(function(x){ return x.uid === c.uid; }); if(lk) usati[lk.da]=1; }); }); });
     var tuttiAll = attTutti(), allegati = {};
     /* le schede di fabbrica viaggiano solo se il prodotto ce l'ha ancora agganciata */
     perClienti.gruppi.forEach(function(g){ g.varianti.forEach(function(v){ v.voci.forEach(function(c){
@@ -6016,7 +6127,7 @@ function datiPerSito(){
   var perClienti = clone(listinoGenerale());
   perClienti.gruppi = perClienti.gruppi.filter(function(g){ return !g.bozza; });
   var usati = {};
-  perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; }); }); });
+  perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; var lk = (perClienti.collegamenti||[]).find(function(x){ return x.uid === c.uid; }); if(lk) usati[lk.da]=1; }); }); });
   var tutti = attTutti(), allegati = {};
   for(var u in tutti) if(usati[u]) allegati[u] = tutti[u];
   return { listino:perClienti, allegati:allegati, sfrido:Number(S.scarto)||0, quando:new Date().toISOString(),
@@ -6040,7 +6151,7 @@ function pacchettoListino(){
   var perClienti = clone(listinoGenerale());
   perClienti.gruppi = perClienti.gruppi.filter(function(g){ return !g.bozza; });
   var usati = {};
-  perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; }); }); });
+  perClienti.gruppi.forEach(function(g){ if(g.foto) usati["sis:"+g.id]=1; g.varianti.forEach(function(v){ v.voci.forEach(function(c){ usati[c.uid]=1; var lk = (perClienti.collegamenti||[]).find(function(x){ return x.uid === c.uid; }); if(lk) usati[lk.da]=1; }); }); });
   var tutti = attTutti(), allegati = {};
   for(var u in tutti) if(usati[u]) allegati[u] = tutti[u];
   var p = { listino:perClienti, allegati:allegati, sfrido:Number(S.scarto)||0,
@@ -6161,6 +6272,21 @@ function linkSitoGh(){
   /* l'indirizzo di prova di avvisi.js, rimasto dai test, non deve finire nelle app */
   if(!CLIENTE && /cementostampato\.it\/app\/avvisi\.js/.test(load(K.avUrl, ""))){ drop(K.avUrl); }
 })();
+/* una volta sola: le SFERE DI VETRO del sasso resinato stanno anche nel cemento stampato (chiesto da SER il 02/11) */
+if(!CLIENTE && !load("pavpro.collega.sfere.v1", null)){
+  try{
+    var giaSfere = collegamenti().some(function(x){ return x.da === "sr1v" && x.g === "cemento-stampato"; });
+    var srcSfere = null; scorriVoci(listinoGenerale(), function(c){ if(!srcSfere && c.uid === "sr1v") srcSfere = c; });
+    var gCS = listinoGenerale().gruppi.find(function(x){ return x.id === "cemento-stampato"; });
+    if(!giaSfere && srcSfere && gCS){
+      var nvS = copiaCollegata(srcSfere, uidNuovo());
+      (gCS.varianti||[]).forEach(function(v){ v.voci.push(clone(nvS)); });
+      collegamenti().push({da:"sr1v", uid:nvS.uid, g:"cemento-stampato", on:{}});
+      salvaListino();
+    }
+    save("pavpro.collega.sfere.v1", {quando:new Date().toISOString()});
+  }catch(e){}
+}
 /* i link corti dei clienti si preparano all'apertura della gestione */
 if(!CLIENTE) setTimeout(function(){ if(typeof registraLinkTutti === "function") registraLinkTutti(); }, 1500);
 function disegnaStatoGh(){
