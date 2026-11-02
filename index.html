@@ -6767,14 +6767,20 @@ mostraVista("prev");
       + '<p style="font-size:13.5px;margin:0">' + msg + '</p>'
       + '<p style="font-size:13.5px;margin:10px 0 0">Riprova fra poco. Se il problema resta, avvisaci.</p>';
   }
-  function prendi(nome, obbligatorio, ripiego){
+  /* il sito puo' rispondere 503 per un minuto subito dopo "Pubblica adesso": si riprova
+     da soli qualche volta e, se non ce la fa, si usa l'ultima copia salvata sul telefono */
+  /* la copia sta in IndexedDB (dati.json pesa qualche MB: in localStorage non ci starebbe) */
+  function dbApri(){ return new Promise(function(ok, no){ try{ var r = indexedDB.open("pavpro-cache", 1); r.onupgradeneeded = function(){ r.result.createObjectStore("dati"); }; r.onsuccess = function(){ ok(r.result); }; r.onerror = function(){ no(r.error); }; }catch(e){ no(e); } }); }
+  function cacheScrivi(v){ return dbApri().then(function(db){ return new Promise(function(ok){ var t = db.transaction("dati", "readwrite"); t.objectStore("dati").put(v, "dati"); t.oncomplete = ok; t.onerror = ok; }); }).catch(function(){}); }
+  function cacheLeggi(){ return dbApri().then(function(db){ return new Promise(function(ok){ var r = db.transaction("dati").objectStore("dati").get("dati"); r.onsuccess = function(){ ok(r.result || null); }; r.onerror = function(){ ok(null); }; }); }).catch(function(){ return null; }); }
+  function attesa(ms){ return new Promise(function(ok){ setTimeout(ok, ms); }); }
+  function prendi(nome, obbligatorio, ripiego, tentativi){
+    tentativi = tentativi || 1;
     return fetch(nome + "?v=" + Date.now(), {cache:"no-store"}).then(function(r){
-      if(!r.ok){
-        if(obbligatorio) throw new Error("Non trovo " + nome + " sul sito (errore " + r.status + ").");
-        return ripiego;
-      }
+      if(!r.ok) throw new Error("Non trovo " + nome + " sul sito (errore " + r.status + ").");
       return r.json();
     }).catch(function(e){
+      if(tentativi < 4){ stato.textContent = "Carico il listino… (tentativo " + (tentativi + 1) + ")"; return attesa(2500).then(function(){ return prendi(nome, obbligatorio, ripiego, tentativi + 1); }); }
       if(obbligatorio) throw e;
       return ripiego;
     });
@@ -6786,8 +6792,16 @@ mostraVista("prev");
       d.avvisi = (res[1] && res[1].avvisi) || [];
       stato.remove();
       avvia(d);
+      cacheScrivi({quando:new Date().toISOString(), d:d});
     })
-    .catch(function(e){ errore(e.message || "Errore di rete."); });
+    .catch(function(e){
+      cacheLeggi().then(function(c){
+        if(!c || !c.d || !c.d.listino){ errore(e.message || "Errore di rete."); return; }
+        stato.className = "card";
+        stato.innerHTML = '<p style="font-size:13px;margin:0"><b>Listino salvato sul telefono</b> (del ' + new Date(c.quando).toLocaleDateString("it-IT") + '): il sito non risponde in questo momento, riprova più tardi per avere eventuali aggiornamenti.</p>';
+        avvia(c.d);
+      });
+    });
 })();
 </script>
 </body>
