@@ -5683,6 +5683,7 @@ function disegnaClienti(){
         + (c.tel ? " \u00b7 wa " + esc(c.tel) : "") + (c.mail ? " \u00b7 " + esc(c.mail) : "")
         + ' \u00b7 aggiornato il '+new Date(c.aggiornato||c.creato).toLocaleDateString("it-IT")+'</span>'
       + '<span class="cd">'+esc(c.code||"")+'</span>'
+      + '<p class="msg" data-cmsg="'+esc(c.id)+'" style="flex-basis:100%;margin:4px 0 0"></p>'
       + '</div>';
   }).join("");
   disegnaBarraCli();
@@ -5778,8 +5779,26 @@ $("btnNuovoCli").addEventListener("click", nuovoCliente);
 
 $("cercaCli").addEventListener("input", disegnaClienti);
 
+/* le risposte ai tasti di una scheda cliente compaiono nella scheda stessa; se la scheda
+   nel frattempo e' stata ridisegnata o eliminata, nel messaggio generale sotto l'elenco */
+function msgCliente(id){
+  var o = {};
+  function el(){ return (id && document.querySelector('[data-cmsg="'+id+'"]')) || $("cliMsg"); }
+  ["className","textContent","innerHTML"].forEach(function(k){ Object.defineProperty(o, k, {get:function(){ return el()[k]; }, set:function(v){ el()[k] = v; }}); });
+  Object.defineProperty(o, "dataset", {get:function(){ return el().dataset; }});
+  o.scrollIntoView = function(a){ el().scrollIntoView(a); };
+  return o;
+}
+function idDalTasto(btn){
+  if(!btn || !btn.attributes) return "";
+  for(var i = 0; i < btn.attributes.length; i++){
+    var a = btn.attributes[i];
+    if(a.name.indexOf("data-cli") === 0){ var v = String(a.value||""); return v.indexOf("|") >= 0 ? v.split("|").pop() : v; }
+  }
+  return "";
+}
 $("elencoClienti").addEventListener("click", function(e){
-  var t, m = $("cliMsg");
+  var t, m = msgCliente(idDalTasto(e.target.closest("button")));
   if((t = e.target.closest("[data-cliusa]"))){
     var cu = clienti.find(function(x){ return x.id === t.getAttribute("data-cliusa"); });
     if(cu){
@@ -6518,6 +6537,8 @@ $("elencoOrdini").addEventListener("click", function(e){
 /* chiamate al servizio dalla gestione: stato, sblocca, blocca */
 function attAdmin(azione, cli, m){
   var a = attImpostazioni();
+  /* la risposta compare sotto l'elenco: la si porta in vista, cosi' non sembra che il tasto non faccia niente */
+  setTimeout(function(){ try{ m.scrollIntoView({block:"nearest", behavior:"smooth"}); }catch(e){} }, 50);
   if(!/^https?:\/\//i.test(a.url||"") || !a.chiave){ m.className="msg err"; m.textContent="Prima imposta il servizio attivazioni (Comunicazioni \u2192 Metti l\u2019app su internet)."; return; }
   m.className = "msg"; m.textContent = "Chiedo al servizio\u2026";
   fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:azione, id:cli.id})})
