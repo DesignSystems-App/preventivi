@@ -4061,14 +4061,53 @@ function linkCliente(cli){
   return url;
 }
 function testoLink(cli, url){
-  return "Ciao" + (cli && cli.nome ? " " + cli.nome : "") + ", ecco il link alla tua app Preventivi Pavimenti di " + (AZIENDA.nome || "Design Systems")
-    + ", con il tuo listino gi\u00e0 attivo:\n" + url
-    + "\n\nSi apre dal telefono con un tocco, senza installare niente. Per averla sempre a portata di mano: in Safari o Chrome tocca Condividi \u2192 Aggiungi alla schermata Home."
-    + "\n\nPer qualunque cosa scrivimi qui.";
+  return "Scarica App Design Systems\n" + url;
+}
+/* i pezzi del link lungo (#c=&n=&i=&e=&t=&p=) come oggetto, per registrarli sul servizio */
+function datiLinkDa(url){
+  var h = String(url).split("#")[1] || "", q = {};
+  h.split("&").forEach(function(kv){ var k = kv.split("="); try{ q[decodeURIComponent(k[0])] = decodeURIComponent((k.slice(1).join("=")||"").replace(/\+/g, " ")); }catch(e){} });
+  return {c:q.c||"", n:q.n||"", i:q.i||"", e:q.e||"", t:q.t||"", p:q.p||""};
+}
+/* Il link corto: sul telefono del cliente arriva solo sito/#k=id, i dati stanno sul
+   servizio. L'id resta lo stesso anche se SER cambia sconti o email: il link gia'
+   mandato continua a valere. Senza servizio (o se non risponde) si usa il link lungo. */
+var LK_TENT = {}, LK_ATTESA = {};
+function linkBreve(cli, poi){
+  var lungo = linkCliente(cli);
+  if(!lungo){ poi(null); return; }
+  if(cli.lk && cli.lkDi === lungo){ poi(cli.lk); return; }
+  var a = (typeof attImpostazioni === "function") ? attImpostazioni() : {};
+  if(!/^https?:\/\//i.test(a.url||"") || !a.chiave){ poi(lungo); return; }
+  if(LK_ATTESA[cli.id]){ LK_ATTESA[cli.id].push(poi); return; }            // richiesta gia' in corso
+  if(LK_TENT[cli.id] && Date.now() - LK_TENT[cli.id] < 60000){ poi(lungo); return; }   // fallita da poco: niente martellate
+  LK_TENT[cli.id] = Date.now(); LK_ATTESA[cli.id] = [poi];
+  function fine(u){ var l = LK_ATTESA[cli.id] || []; delete LK_ATTESA[cli.id]; l.forEach(function(f){ f(u); }); }
+  var vecchio = (/#k=([a-z0-9]+)/.exec(cli.lk || "") || [])[1] || "";
+  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:"link", id:vecchio, dati:datiLinkDa(lungo)})})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(j && j.ok && j.id){ cli.lk = lungo.split("#")[0] + "#k=" + j.id; cli.lkDi = lungo; delete LK_TENT[cli.id]; salvaClienti(); fine(cli.lk); }
+      else fine(lungo);
+    })
+    .catch(function(){ fine(lungo); });
+}
+function linkPronto(cli){ var l = linkCliente(cli); return !!(l && cli.lk && cli.lkDi === l); }
+/* i link di tutti i clienti si registrano in anticipo, cosi' i tasti rispondono subito */
+function registraLinkTutti(){
+  if(CLIENTE || typeof clienti === "undefined") return;
+  (clienti || []).forEach(function(c){ if(c.code && !linkPronto(c)) linkBreve(c, function(){}); });
 }
 function mandaLink(cli, m, modo){
-  var url = linkCliente(cli), copiaSolo = (modo === true || modo === "copia");
-  if(!url){ m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso): il link personale si costruisce sull\u2019indirizzo del sito."; return; }
+  /* WhatsApp si apre in una finestra nuova: Safari la blocca se arriva dopo un'attesa,
+     quindi si apre subito vuota e si riempie quando il link corto e' pronto */
+  var finestra = null;
+  if((modo === "wa" || modo === undefined || modo === false) && !linkPronto(cli) && linkCliente(cli)){ try{ finestra = window.open("about:blank", "_blank"); }catch(e){ finestra = null; } }
+  linkBreve(cli, function(url){ mandaLink2(cli, m, modo, url, finestra); });
+}
+function mandaLink2(cli, m, modo, url, finestra){
+  var copiaSolo = (modo === true || modo === "copia");
+  if(!url){ if(finestra) finestra.close(); m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso): il link personale si costruisce sull\u2019indirizzo del sito."; return; }
   if(!cli.code){ m.className="msg err"; m.textContent="Questo cliente non ha un codice: salvalo di nuovo."; return; }
   if(modo === "mail"){
     var dest = String(cli.mail || "").trim();
@@ -4090,8 +4129,9 @@ function mandaLink(cli, m, modo){
     else { m.className="msg"; m.textContent=url; }
     return;
   }
-  var num = numeroWaCliente(cli.tel);
-  window.open("https://wa.me/" + num + "?text=" + encodeURIComponent(testoLink(cli, url)), "_blank", "noopener");
+  var num = numeroWaCliente(cli.tel), waUrl = "https://wa.me/" + num + "?text=" + encodeURIComponent(testoLink(cli, url));
+  if(finestra){ try{ finestra.location.href = waUrl; }catch(e){ window.open(waUrl, "_blank", "noopener"); } }
+  else window.open(waUrl, "_blank", "noopener");
   var np = cli.voci ? Object.keys(cli.voci).length : 0;
   m.className="msg ok";
   m.textContent = "WhatsApp aperto" + (num ? " sul numero di " + (cli.nome||"questo cliente") : " (scegli tu il contatto: sulla sua scheda non c\u2019\u00e8 il numero)")
@@ -4985,7 +5025,7 @@ function mandaOrdinePdf2(via, m){
   if(file && navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
     /* solo il file, senza testo: su iPhone WhatsApp prende il testo e lascia indietro il PDF quando ci sono tutti e due */
     navigator.share({files:[file], title:intest}).then(function(){
-      m.className="msg ok"; m.textContent="PDF dell\u2019ordine n. " + ORD_CORRENTE.numero + " condiviso." + (via==="tutti" ? " Ora si apre l\u2019email con l\u2019ordine completo: premi Invia." : "");
+      m.className="msg ok"; m.textContent="PDF dell\u2019ordine n. " + ORD_CORRENTE.numero + " condiviso." + (via==="tutti" ? " Ora si apre l\u2019email con l\u2019ordine completo: premi Invia." : " Se vuoi mandarlo anche per email, premi Invia per email.");
       poiEmail();
     }).catch(function(e){
       if(e && e.name === "AbortError"){ m.className="msg"; m.textContent="Invio annullato: l\u2019ordine n. " + ORD_CORRENTE.numero + " resta registrato, puoi rimandarlo."; return; }
@@ -5067,7 +5107,7 @@ function aggiornaInvii(r){
   if(ordine){
     /* un gesto: il PDF su WhatsApp e l'ordine completo per email, tutti e due all'azienda */
     $("btnWa").href = "#"; $("btnMail").href = "#";
-    $("btnWa").setAttribute("data-pdf", "tutti"); $("btnMail").setAttribute("data-pdf", "mail");
+    $("btnWa").setAttribute("data-pdf", "wa"); $("btnMail").setAttribute("data-pdf", "mail");
   } else {
     $("btnWa").removeAttribute("data-pdf"); $("btnMail").removeAttribute("data-pdf");
     $("btnWa").href = "https://wa.me/" + numDest + "?text=" + encodeURIComponent(testo);
@@ -5469,7 +5509,10 @@ function attivaCliente(c){
   return true;
 }
 
+var LK_TIMER = null;
 function salvaClienti(){
+  /* dopo un salvataggio, i link corti dei clienti cambiati si aggiornano da soli (poco dopo, una volta sola) */
+  if(!CLIENTE){ clearTimeout(LK_TIMER); LK_TIMER = setTimeout(function(){ if(typeof registraLinkTutti === "function") registraLinkTutti(); }, 800); }
   if(!save(K.clienti, clienti)){
     var m=$("cliMsg"); m.className="msg err";
     m.textContent="Non sono riuscito a salvare l'elenco clienti: memoria del browser piena o bloccata.";
@@ -5585,10 +5628,13 @@ $("elencoClienti").addEventListener("click", function(e){
   if((t = e.target.closest("[data-cliapri]"))){
     var cap = clienti.find(function(x){ return x.id === t.getAttribute("data-cliapri"); });
     if(cap){
-      var lk = linkCliente(cap);
-      if(!lk){ m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso)."; return; }
-      window.open(lk, "_blank", "noopener");
-      m.className="msg ok"; m.textContent="App di " + (cap.nome||"questo cliente") + " aperta in una scheda nuova. Attenzione: aprendola da qui la attivi su questo computer; se il link \u00e8 usa e getta, dopo la prova premi Sblocca link.";
+      if(!linkCliente(cap)){ m.className="msg err"; m.textContent="Prima pubblica l\u2019app (Comunicazioni \u2192 Pubblica adesso)."; return; }
+      var fin = null;
+      if(!linkPronto(cap)){ try{ fin = window.open("about:blank", "_blank"); }catch(e){ fin = null; } }
+      linkBreve(cap, function(lk){
+        if(fin){ try{ fin.location.href = lk; }catch(e){ window.open(lk, "_blank", "noopener"); } } else window.open(lk, "_blank", "noopener");
+        m.className="msg ok"; m.textContent="App di " + (cap.nome||"questo cliente") + " aperta in una scheda nuova. Attenzione: aprendola da qui la attivi su questo computer; se il link \u00e8 usa e getta, dopo la prova premi Sblocca link.";
+      });
     }
     return;
   }
@@ -6087,6 +6133,8 @@ function linkSitoGh(){
   /* l'indirizzo di prova di avvisi.js, rimasto dai test, non deve finire nelle app */
   if(!CLIENTE && /cementostampato\.it\/app\/avvisi\.js/.test(load(K.avUrl, ""))){ drop(K.avUrl); }
 })();
+/* i link corti dei clienti si preparano all'apertura della gestione */
+if(!CLIENTE) setTimeout(function(){ if(typeof registraLinkTutti === "function") registraLinkTutti(); }, 1500);
 function disegnaStatoGh(){
   var g = ghImpostazioni(), st = $("ghStato");
   if(document.activeElement !== $("ghUser")) $("ghUser").value = g.user || "";
@@ -6785,14 +6833,33 @@ mostraVista("prev");
       return ripiego;
     });
   }
+  /* link personale corto (#k=id): i dati del link si prendono dal servizio e si
+     rimettono nell'indirizzo nella forma lunga, che il programma gia' conosce */
+  function risolviLink(d){
+    var mk = /(^|[#&])k=([a-z0-9]{6,20})(&|$)/.exec(location.hash || "");
+    if(!mk || /(^|[#&])c=/.test(location.hash || "") || !d.attivaUrl) return Promise.resolve("");
+    return fetch(d.attivaUrl.replace(/\/+$/, "") + "/link/" + mk[2], {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(j){
+      if(!j || !j.ok || !j.dati || !j.dati.c) return "vecchio";
+      var q = j.dati, h = "#c=" + encodeURIComponent(q.c) + "&n=" + encodeURIComponent(q.n||"") + "&i=" + encodeURIComponent(q.i||"")
+        + (q.e ? "&e=" + encodeURIComponent(q.e) : "") + (q.t ? "&t=" + q.t : "") + (q.p ? "&p=" + q.p : "") + "&k=" + mk[2];
+      history.replaceState(null, "", location.pathname + location.search + h);
+      return "";
+    }).catch(function(){ return "rete"; });
+  }
   Promise.all([ prendi("dati.json", true, null), prendi("avvisi.json", false, {avvisi:[]}) ])
     .then(function(res){
       var d = res[0];
       if(!d || !d.listino || !d.listino.gruppi) throw new Error("Il file dati.json non è leggibile.");
       d.avvisi = (res[1] && res[1].avvisi) || [];
-      stato.remove();
-      avvia(d);
-      cacheScrivi({quando:new Date().toISOString(), d:d});
+      return risolviLink(d).then(function(esito){
+        if(esito === "rete") throw new Error("Non riesco a leggere il tuo link personale (manca la connessione?).");
+        if(esito === "vecchio"){
+          stato.className = "card";
+          stato.innerHTML = '<p style="font-size:13px;margin:0"><b>Questo link non è più valido.</b> Chiedi a Design Systems di mandartene uno nuovo. Intanto vedi il listino senza sconti.</p>';
+        } else stato.remove();
+        avvia(d);
+        cacheScrivi({quando:new Date().toISOString(), d:d});
+      });
     })
     .catch(function(e){
       cacheLeggi().then(function(c){
