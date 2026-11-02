@@ -1480,20 +1480,25 @@ function applicaModifiche(base, m){
   (m.nuoviGruppi||[]).forEach(function(g){
     if(!base.gruppi.some(function(x){ return x.id === g.id; })) base.gruppi.push(g);
   });
-  /* il DS-REMUK del sasso resinato va per sacco di ghiaino: se SER aveva gia'
-     toccato le granulometrie del ghiaino, la sua tabella resta ma passa a
-     "per sacco" (una volta sola: se poi la toglie, resta tolta) */
+  /* DS-REMUK del sasso resinato (regola del 02/11): per impasto 1,00 kg/m² con ghiaino
+     1/4 mm, 0,90 con 4/8 mm, mano a rullo 0,45 sempre. Niente piu' "per sacco", e i
+     modi "1/4" / "4/8" aggiunti a mano in gestione lasciano il posto a quello automatico. */
   base.gruppi.forEach(function(g){ g.varianti.forEach(function(v){ v.voci.forEach(function(c){
-    if((c.uid === "sr1b" || c.uid === "sr2b") && Array.isArray(c.consumi) && c.consumi.length
-       && c.consumi.every(function(z){ return z.gran === undefined; })){
-      var qualcuno = false;
-      c.consumi.forEach(function(z){ if(/impasto/i.test(String(z.nome||""))){ z.gran = true; qualcuno = true; } });
-      if(!qualcuno) c.consumi[0].gran = true;
+    if((c.uid === "sr1b" || c.uid === "sr2b") && Array.isArray(c.consumi) && c.consumi.length){
+      if(c.consumi.some(function(z){ return /1\/4|4\/8/.test(String(z.nome||"")); })){
+        c.consumi = [{id:c.uid+"imp", nome:"Per impasto", v:0.9, gran:true},{id:c.uid+"rul", nome:"Mano a rullo", v:0.45}];
+        c.consumoMq = 0.9;
+      } else if(c.consumi.every(function(z){ return z.gran === undefined; })){
+        var qualcuno = false;
+        c.consumi.forEach(function(z){ if(/impasto/i.test(String(z.nome||""))){ z.gran = true; qualcuno = true; } });
+        if(!qualcuno) c.consumi[0].gran = true;
+      }
     }
-    if((c.uid === "sr1c" || c.uid === "sr2c") && c.granulo && c.granulo.consumi && c.granulo.perSacco === undefined){
+    if((c.uid === "sr1c" || c.uid === "sr2c") && c.granulo){
+      c.granulo.perSacco = {};
+      if(!c.granulo.consumi) c.granulo.consumi = {};
       var ur = c.uid === "sr1c" ? "sr1b" : "sr2b";
-      c.granulo.perSacco = c.granulo.consumi[ur] ? {} : {};
-      if(c.granulo.consumi[ur]) c.granulo.perSacco[ur] = true;
+      if(!c.granulo.consumi[ur]) c.granulo.consumi[ur] = {"1/4 mm":1, "4/8 mm":0.9};
     }
   }); }); });
   return base;
@@ -2046,7 +2051,11 @@ function consumiSostituiti(v){
     v.voci.forEach(function(g){
       if(!g.granulo || !g.granulo.consumi) return;
       var scelta = S.granulo[g.uid];
-      if(!scelta && !(g.granulo.perSacco && modoPercentuale(g) && coloriScelti(g).length > 1)) return;
+      /* le granulometrie in gioco: quella scelta sul prodotto e quelle dei singoli colori */
+      var scelte = [];
+      if(scelta) scelte.push(scelta);
+      if(modoPercentuale(g)) coloriScelti(g).forEach(function(k){ var gc = granuloDiColore(g, k); if(gc && scelte.indexOf(gc) < 0) scelte.push(gc); });
+      if(!scelte.length && !(g.granulo.perSacco && modoPercentuale(g) && coloriScelti(g).length > 1)) return;
       for(var uid in g.granulo.consumi){
         if(suDiSe ? (uid !== g.uid) : (uid === g.uid)) continue;
         var tab = g.granulo.consumi[uid];
@@ -2056,9 +2065,12 @@ function consumiSostituiti(v){
           if(ps){ ov[uid] = ps.v; perche[uid] = ps.perche; }
           continue;
         }
-        if(tab[scelta] !== undefined && tab[scelta] !== null && tab[scelta] !== ""){
-          ov[uid] = Number(tab[scelta]);
-          perche[uid] = scelta;               // quale scelta ha cambiato il consumo
+        var valori = [], nomi = [];
+        scelte.forEach(function(sc){ if(tab[sc] !== undefined && tab[sc] !== null && tab[sc] !== ""){ valori.push(Number(tab[sc])); nomi.push(sc); } });
+        if(valori.length){
+          /* con piu' granulometrie insieme (es. 1/4 e 4/8) vale il consumo maggiore */
+          ov[uid] = Math.max.apply(null, valori);
+          perche[uid] = nomi.length > 1 ? nomi.join(" e ") + " (vale il maggiore)" : nomi[0];
         }
       }
     });
@@ -2532,7 +2544,7 @@ function granuloEdit(c){
     var saccoKg = formatoScelto(c).kg || Number(c.kgConf) || 0;
     return '<div class="grblock"><div class="grtit">' + esc(v ? v.nome : ut) + (ut === c.uid ? " (questo prodotto)" : "")
       + '<button class="step" type="button" data-grpdel="'+esc(c.uid)+'|'+esc(ut)+'" aria-label="Togli questo prodotto">×</button></div>'
-      + (ut !== c.uid
+      + (ut !== c.uid && !(c.uid === "sr1c" || c.uid === "sr2c")   /* il DS-REMUK va al m², non per sacco */
           ? '<label class="chk" style="margin:0 0 6px;font-size:12.5px"><input type="checkbox" data-grsacco="'+esc(c.uid)+'|'+esc(ut)+'"'+(perSacco?' checked':'')+'> '
             + 'i numeri sono kg per ogni sacco'+(saccoKg>0 ? ' da '+esc(NI(saccoKg))+' '+esc(String(c.unita||"").toLowerCase()) : '')+' di '+esc(c.nome)+', non al m\u00b2'
             + (perSacco && saccoKg>0 && Number(c.consumoMq)>0 ? ' <span class="hint">(con '+esc(N(c.consumoMq))+' '+esc(String(c.unita||"").toLowerCase())+'/m\u00b2 un sacco fa '+esc(N(Math.round(saccoKg/Number(c.consumoMq)*100)/100))+' m\u00b2)</span>' : '')
