@@ -1695,11 +1695,15 @@ function applicaModifiche(base, m){
       c.consumi.forEach(function(z){ delete z.gran; });
       if(!c.consumi.some(function(z){ return /1\/4/.test(String(z.nome||"")); })) c.consumi.push({id:c.uid+"imp14", nome:"Per impasto 1/4 mm", v:1});
       c.consumi.forEach(function(z){ if(/^per impasto$/i.test(String(z.nome||"").trim())) z.nome = "Per impasto 4/8 mm"; });
+      /* lo spessore (03/11): l'impasto segue lo spessore scelto, la mano a rullo no —
+         anche quando i modi arrivano dalle modifiche salvate da SER */
+      c.consumi.forEach(function(z){ if(/impasto/i.test(String(z.nome||""))) z.spessore = true; else delete z.spessore; });
     }
     if((c.uid === "sr1c" || c.uid === "sr2c" || c.uid === "sr3c") && c.granulo){
       /* la granulometria del ghiaino non comanda piu' nessun consumo */
       delete c.granulo.consumi; delete c.granulo.perSacco;
     }
+    if(c.uid === "sr1c" || c.uid === "sr2c" || c.uid === "sr3c") c.spessore = true;   /* il ghiaino segue lo spessore */
     /* il ghiaino sta subito sotto al DS-REMUK, poi cornici e rosoni */
     if(c.uid === "sr1c" || c.uid === "sr2c" || c.uid === "sr3c"){
       var ib = v.voci.findIndex(function(z){ return z.uid === c.uid.slice(0, 3) + "b"; }), ic = v.voci.indexOf(c);
@@ -2959,10 +2963,11 @@ function sceltaVarianti(c){
       + lc.map(function(z){
           var mio = idsSel.indexOf(z.id) >= 0;
           var segue = segnati ? (z.gran === true) : (!!primo && z.id === primo.id);
-          var val = (imp && segue) ? imp.v : Number(z.v);
+          var val = ((imp && segue) ? imp.v : Number(z.v)) * (z.spessore ? fattoreSpessore() : 1);
           return '<button class="chip" type="button" data-csel="'+esc(c.uid)+'|'+esc(z.id)+'" aria-pressed="'+mio+'">'
                + esc(z.nome || "")+(z.nome?' · ':'')+N(val)+' '+esc(u)+'/m²'
                + (imp && segue ? ' <small style="opacity:.75">(segue il ghiaino)</small>' : '')
+               + (z.spessore && fattoreSpessore() !== 1 ? ' <small style="opacity:.75">(spessore '+esc(nomeSpessore())+')</small>' : '')
                + '</button>';
         }).join("")
       + '<span class="hint" style="flex-basis:100%">Puoi sceglierne pi\u00f9 di uno: i consumi si sommano.</span>'
