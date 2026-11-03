@@ -926,7 +926,15 @@ if(CLIENTE && SORGENTE === "online"){
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
-      if(giaOk && giaOk.attivato && giaOk.id === LINK_CLI.id && giaOk.code === LINK_CLI.code && giaOk.t === LINK_CLI.t){
+      /* lo stesso link (stesso id e stesso numero) resta attivo anche se il codice sconto e' cambiato:
+         SER ritocca i prezzi di un cliente, il codice si rigenera, ma il telefono e' sempre quello
+         (03/11: "l'attivazione deve essere fatta una sola volta"). Il servizio lo riconferma all'apertura. */
+      /* l'impronta t cambia col codice: il telefono e' lo stesso se il numero salvato rifa' l'impronta nuova */
+      var stessoTelefono = giaOk && (!LINK_CLI.t || giaOk.t === LINK_CLI.t
+        || (giaOk.telOk && improntaNumero(giaOk.telOk, LINK_CLI.code) === LINK_CLI.t));
+      var stessoLink = giaOk && giaOk.attivato && stessoTelefono
+        && ((giaOk.id && LINK_CLI.id) ? giaOk.id === LINK_CLI.id : giaOk.code === LINK_CLI.code);
+      if(stessoLink){
         LINK_CLI.attivato = true; LINK_CLI.okTel = true; LINK_CLI.telOk = giaOk.telOk || "";
       } else {
         LINK_CLI.daConfermare = true;
@@ -3426,6 +3434,16 @@ function disegnaRighe(r){
       + cat
       + '</div>';
   }).join("");
+  /* sul listino di un cliente si cambiano solo i prezzi: gli altri campi sono spenti davvero
+     (non solo bloccati al mouse: col tasto Tab ci si arrivava lo stesso e la modifica andava persa) */
+  if(cliListino){
+    $("righe").querySelectorAll('.row.soloprezzi .editgrid input:not([data-ed="prezzoConf"]):not([data-cfpz]):not([data-cpz]), .row.soloprezzi .editgrid select, .row.soloprezzi .editgrid textarea').forEach(function(el){ el.disabled = true; });
+    $("righe").querySelectorAll('.row.soloprezzi .editgrid').forEach(function(eg){
+      var av = document.createElement("p"); av.className = "hint full"; av.style.margin = "0 0 8px";
+      av.innerHTML = 'Qui cambi solo i <b>prezzi di questo cliente</b>. Colori, confezioni, consumi e descrizioni si cambiano sul <b>Listino generale \u2014 vale per tutti</b> (in alto) e valgono per tutti i clienti.';
+      eg.insertBefore(av, eg.firstChild);
+    });
+  }
 }
 
 /* Il nome di chi ha questi sconti, se lo sappiamo: senza, davanti a un
