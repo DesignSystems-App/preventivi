@@ -1622,6 +1622,20 @@ function migraTavolaMicroTopp(m){
    finche' non le cambia direttamente sul fondo umido */
 function migraFondoUmido(m){
   if(!m || typeof m !== "object") return m;
+  /* 03/11: le confezioni del DS-REMUK (10 kg e 5 kg) devono esserci anche se SER aveva salvato
+     l'elenco prima che il 5 kg esistesse, o l'aveva tolto: si rimettono una volta sola */
+  if(m.voci && !load("pavpro.migra.remuk5kg.v1", null)){
+    var fatte = false;
+    ["sr1b","sr2b"].forEach(function(uid){
+      var mv = m.voci[uid]; if(!mv || !Array.isArray(mv.confs)) return;
+      [{id:uid+"k10", kg:10, prezzo:600}, {id:uid+"k5", kg:5, prezzo:null}].forEach(function(b){
+        var c = mv.confs.find(function(z){ return Number(z.kg) === b.kg; });
+        if(!c){ mv.confs.push({id:b.id, kg:b.kg, prezzo:b.prezzo, on:true}); fatte = true; }
+        else if(c.on === false){ c.on = true; fatte = true; }
+      });
+    });
+    save("pavpro.migra.remuk5kg.v1", {quando:new Date().toISOString(), fatte:fatte});
+  }
   /* 03/11: la frase "Spessore 1 cm. Moltiplicare..." del sasso resinato non serve piu' (il programma calcola da solo) */
   if(m.gruppi && m.gruppi["sasso-resinato"] && /^Spessore 1 cm\./.test(String(m.gruppi["sasso-resinato"].nota || ""))){ delete m.gruppi["sasso-resinato"].nota; if(!Object.keys(m.gruppi["sasso-resinato"]).length) delete m.gruppi["sasso-resinato"]; }
   /* coppie [uid di partenza, uid della copia]: i sottofondi aggiunti il 02-03/11 partono dalla scheda esistente */
@@ -1697,7 +1711,12 @@ function applicaModifiche(base, m){
       c.consumi.forEach(function(z){ if(/^per impasto$/i.test(String(z.nome||"").trim())) z.nome = "Per impasto 4/8 mm"; });
       /* lo spessore (03/11): l'impasto segue lo spessore scelto, la mano a rullo no —
          anche quando i modi arrivano dalle modifiche salvate da SER */
-      c.consumi.forEach(function(z){ if(/impasto/i.test(String(z.nome||""))) z.spessore = true; else delete z.spessore; });
+      c.consumi.forEach(function(z){
+        delete z.spessore;
+        if(/impasto/i.test(String(z.nome||""))){ z.perSacco = true; z.sacco = 25; z.di = c.uid.slice(0, 3) + "c"; }
+        else { delete z.perSacco; delete z.sacco; delete z.di; }
+      });
+      if(/^Per impasto: 1,00 kg\/m/.test(String(c.nota||""))) c.nota = "Per impasto: 1,00 kg di DS-REMUK per ogni sacco da 25 kg di ghiaino 1/4 mm, 0,900 kg per sacco di 4/8 mm: il consumo al m\u00b2 segue il ghiaino e lo spessore. La mano a rullo sopra l\u2019impasto aggiunge 0,450 kg/m\u00b2.";
     }
     if((c.uid === "sr1c" || c.uid === "sr2c" || c.uid === "sr3c") && c.granulo){
       /* la granulometria del ghiaino non comanda piu' nessun consumo */
@@ -2265,15 +2284,28 @@ function consumoEffettivo(c, ovr, giri){
   var tot = 0, fatto = false;
   sel.forEach(function(z, i){
     var mio = comandatoDaGrana(c, z, i) && !fatto, fz = z.spessore ? f : 1;
+    if(z.perSacco){ tot += valoreModo(c, z, giri); return; }
     if(mio && imp !== null){ tot += imp * fz; fatto = true; } else tot += (Number(z.v)||0) * fz;
   });
   return tot;
+}
+/* Un modo "per sacco" (l'impasto del DS-REMUK): z.v sono i kg per ogni sacco di
+   ghiaino da z.sacco kg; al m² vale z.v x (kg/m² del ghiaino) / z.sacco. Cosi' segue
+   da solo lo spessore e la quantita' di ghiaino. Senza ghiaino nella scheda, z.v al m². */
+function valoreModo(c, z, giri){
+  var fz = z.spessore ? fattoreSpessore() : 1;
+  if(!z.perSacco) return (Number(z.v)||0) * fz;
+  var rif = vociCorrenti().find(function(x){ return x.uid === z.di; });
+  if(!rif || (giri||0) >= 4) return (Number(z.v)||0) * fz;
+  var kgGhiaino = consumoEffettivo(rif, consumiSostituiti(varianteCorrente()), (giri||0) + 1);
+  var sacco = Number(z.sacco) || 25;
+  return (Number(z.v)||0) * kgGhiaino / sacco;
 }
 /* la voce segue lo spessore scelto? (per dirlo nella riga) */
 function segueSpessore(c){
   if(fattoreSpessore() === 1) return false;
   if(c.spessore) return true;
-  if(consumiScelti(c).some(function(z){ return z.spessore; })) return true;
+  if(consumiScelti(c).some(function(z){ return z.spessore || z.perSacco; })) return true;
   var rif = legatoA(c); return !!(rif && segueSpessore(rif));
 }
 /* Quale modo di consumo segue la granulometria del ghiaino: quelli segnati
@@ -2803,7 +2835,7 @@ function varianti(c){
           ? '<input type="checkbox" data-csgran="'+esc(c.uid)+'|'+esc(z.id)+'"'+(z.gran===true?' checked':'')+' title="Segue la granulometria del ghiaino" aria-label="Segue la granulometria del ghiaino">'
           : '<span></span>')
       + '<input type="text" data-csnome="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(z.nome||"")+'" placeholder="a rullo" style="text-align:left" aria-label="Come si applica">'
-      + '<input type="text" inputmode="decimal" data-csv="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(NI(z.v))+'" placeholder="'+esc(u||"kg")+'/m²" aria-label="Consumo al metro quadro">'
+      + '<input type="text" inputmode="decimal" data-csv="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(NI(z.v))+'" placeholder="'+esc(u||"kg")+(z.perSacco ? '/sacco' : '/m²')+'" title="'+(z.perSacco ? 'kg per ogni sacco da '+esc(NI(z.sacco||25))+' kg di ghiaino (al m² si calcola da solo)' : 'kg al metro quadro')+'" aria-label="'+(z.perSacco ? 'Consumo per sacco di ghiaino' : 'Consumo al metro quadro')+'">'
       + (kgSacco>0
           ? '<input type="text" inputmode="decimal" data-csresa="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(rr===null?"":NI(rr))+'" placeholder="resa m²" title="Resa in m² per confezione da '+esc(NI(kgSacco))+' '+esc(u)+'" aria-label="Resa in metri quadri per confezione">'
           : '<span class="vresa">\u2014</span>')
@@ -2963,11 +2995,11 @@ function sceltaVarianti(c){
       + lc.map(function(z){
           var mio = idsSel.indexOf(z.id) >= 0;
           var segue = segnati ? (z.gran === true) : (!!primo && z.id === primo.id);
-          var val = ((imp && segue) ? imp.v : Number(z.v)) * (z.spessore ? fattoreSpessore() : 1);
+          var val = z.perSacco ? valoreModo(c, z) : ((imp && segue) ? imp.v : Number(z.v)) * (z.spessore ? fattoreSpessore() : 1);
           return '<button class="chip" type="button" data-csel="'+esc(c.uid)+'|'+esc(z.id)+'" aria-pressed="'+mio+'">'
                + esc(z.nome || "")+(z.nome?' · ':'')+N(val)+' '+esc(u)+'/m²'
                + (imp && segue ? ' <small style="opacity:.75">(segue il ghiaino)</small>' : '')
-               + (z.spessore && fattoreSpessore() !== 1 ? ' <small style="opacity:.75">(spessore '+esc(nomeSpessore())+')</small>' : '')
+               + (z.perSacco ? ' <small style="opacity:.75">('+esc(NI(z.v))+' '+esc(u)+' per sacco da '+esc(NI(z.sacco||25))+' kg di ghiaino'+(fattoreSpessore() !== 1 ? ', spessore '+esc(nomeSpessore()) : '')+')</small>' : (z.spessore && fattoreSpessore() !== 1 ? ' <small style="opacity:.75">(spessore '+esc(nomeSpessore())+')</small>' : ''))
                + '</button>';
         }).join("")
       + '<span class="hint" style="flex-basis:100%">Puoi sceglierne pi\u00f9 di uno: i consumi si sommano.</span>'
