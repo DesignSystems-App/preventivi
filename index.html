@@ -1622,6 +1622,20 @@ function migraTavolaMicroTopp(m){
    finche' non le cambia direttamente sul fondo umido */
 function migraFondoUmido(m){
   if(!m || typeof m !== "object") return m;
+  /* 03/11: SER ha cancellato per sbaglio il NERO dalla cartella del RE-COLOR: si rimette una volta
+     sola, preso dalla tavola di fabbrica (la stessa dell'ANTIQUE), al suo posto in cima */
+  if(m.voci && !load("pavpro.migra.recolor.nero.v1", null)){
+    var neroBase = (typeof COLORI_RECOLOR !== "undefined" ? COLORI_RECOLOR : []).find(function(k){ return k.n === "NERO"; });
+    var rimesso = [];
+    if(neroBase) Object.keys(m.voci).forEach(function(uid){
+      var mv = m.voci[uid]; if(!mv || !Array.isArray(mv.colori)) return;
+      var base = null; scorriVoci(LISTINO_BASE, function(c){ if(c.uid === uid) base = c; });
+      if(!base || String(base.nome||"").toUpperCase() !== "RE-COLOR") return;
+      if(mv.colori.some(function(k){ return k && k.n === "NERO"; })) return;
+      mv.colori.unshift(clone(neroBase)); rimesso.push(uid);
+    });
+    save("pavpro.migra.recolor.nero.v1", {quando:new Date().toISOString(), rimesso:rimesso});
+  }
   /* 03/11: le confezioni del DS-REMUK (10 kg e 5 kg) devono esserci anche se SER aveva salvato
      l'elenco prima che il 5 kg esistesse, o l'aveva tolto: si rimettono una volta sola */
   if(m.voci && !load("pavpro.migra.remuk5kg.v1", null)){
