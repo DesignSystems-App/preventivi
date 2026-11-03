@@ -6917,14 +6917,30 @@ function testoRifiuto(motivo){
       });
     }
   } else if(LINK_CLI.attivato && urlAttivazioni()){
-    /* gia' attivo: un controllo silenzioso, per rispettare un blocco deciso in gestione */
-    attivaSulServizio("", function(ok, motivo){
-      if(!ok && (motivo === "bloccato" || motivo === "usato")){
-        /* via il listino personale; alla ricarica si spiega il perche' */
-        drop(K.link); drop(K.cli); save("pavpro.rifiuto.v1", {motivo:motivo});
-        location.reload();
-      }
-    });
+    /* gia' attivo: un controllo silenzioso all'apertura e poi ogni 90 secondi, per rispettare
+       quello che si decide in gestione (Sblocca link, Blocca, Rifiuta). Il telefono non si fida
+       piu' solo di se stesso: se il servizio non lo riconosce, si torna alla pagina di attivazione. */
+    var controlloInCorso = false;
+    function controlloSilenzioso(){
+      if(controlloInCorso) return; controlloInCorso = true;
+      attivaSulServizio(LINK_CLI.telOk || "", function(ok, motivo){
+        controlloInCorso = false;
+        if(ok) return;
+        if(motivo === "attesa"){
+          /* il link e' stato sbloccato in gestione: questo telefono deve riattivarsi (numero + codice) */
+          LINK_CLI.attivato = false; LINK_CLI.daConfermare = true; LINK_CLI.okTel = !LINK_CLI.t;
+          delete LINK_CLI.inAttesa; delete LINK_CLI.telOk;
+          save(K.link, LINK_CLI); drop(K.cli);
+          location.reload();
+        } else if(motivo === "bloccato" || motivo === "usato" || motivo === "rifiutato" || motivo === "troppe"){
+          /* via il listino personale; alla ricarica si spiega il perche' */
+          drop(K.link); drop(K.cli); save("pavpro.rifiuto.v1", {motivo:motivo});
+          location.reload();
+        }
+      });
+    }
+    controlloSilenzioso();
+    setInterval(controlloSilenzioso, 90000);
   }
 })();
 
