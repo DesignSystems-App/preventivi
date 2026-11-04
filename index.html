@@ -1662,6 +1662,17 @@ function migraTavolaMicroTopp(m){
    finche' non le cambia direttamente sul fondo umido */
 function migraFondoUmido(m){
   if(!m || typeof m !== "object") return m;
+  /* 04/11: nel Pavimento Terrazzo (livius-t) la vecchia routine aveva copiato UNI-PRIMER, PRIMER A300 e
+     GHIAINO come prodotti nuovi "tz…"; ora la scheda di fabbrica li ha gia': via le copie con lo stesso nome */
+  if(Array.isArray(m.nuoveVoci)){
+    var baseLT = {};
+    (LISTINO_BASE.gruppi || []).forEach(function(gb){ if(gb.id !== "livius-t") return; (gb.varianti||[]).forEach(function(v){ baseLT[v.id] = (v.voci||[]).map(function(c){ return String(c.nome||"").trim().toUpperCase(); }); }); });
+    m.nuoveVoci = m.nuoveVoci.filter(function(nv){
+      if(!nv || nv.g !== "livius-t" || !nv.voce || !/^tz/.test(String(nv.voce.uid||""))) return true;
+      var nomi = baseLT[nv.v] || [];
+      return nomi.indexOf(String(nv.voce.nome||"").trim().toUpperCase()) < 0;
+    });
+  }
   /* 04/11: via i caratteri di controllo dai testi salvati (incollati da PDF) */
   (function pulisciRicorsivo(o, prof){
     if(!o || typeof o !== "object" || prof > 8) return;
