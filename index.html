@@ -7561,6 +7561,48 @@ function sistemaCeraTerrazzo(){
   if(fatti) salvaListino();
   return fatti;
 }
+/* 04/11, una volta sola: TIX-CEM nel Pavimento Terrazzo e nel Livius-A, in ogni scheda
+   uno solo, subito dopo UNI-PRIMER 280 NEW. Dove ce n'erano due (quello di fabbrica
+   senza prezzo e quello aggiunto da SER con il prezzo) resta quello con il prezzo;
+   dove mancava si copia quello con il prezzo; i prezzi vuoti prendono quello di SER. */
+function sistemaTixCem(){
+  if(load("pavpro.migra.tixcem.v1", null)) return 0;
+  var G = listinoGenerale(), fatti = 0;
+  function isTix(c){ return /^TIX-CEM$/i.test(String(c.nome||"").trim()); }
+  function conPrezzo(c){ return c.prezzoConf !== null && c.prezzoConf !== undefined && c.prezzoConf !== ""; }
+  var modello = null;
+  scorriVoci(G, function(c){ if(!modello && isTix(c) && conPrezzo(c)) modello = c; });
+  (G.gruppi || []).forEach(function(g){
+    if(!/terrazz|livius-[ta]/i.test(String(g.nome||"") + " " + g.id)) return;
+    (g.varianti || []).forEach(function(v){
+      v.voci = v.voci || [];
+      var tix = v.voci.filter(isTix), fabbrica = uidDiFabbrica();
+      /* resta la voce di fabbrica (ha il suo posto fisso dopo il primer); i dati di SER
+         (prezzo, confezione, descrizione, spunta) passano su di lei */
+      var tieni = tix.find(function(c){ return fabbrica[c.uid]; }) || tix.find(conPrezzo) || tix[0] || null;
+      var dati = tix.find(function(c){ return conPrezzo(c) && c !== tieni; }) || null;
+      if(!tieni){
+        var mod = modello; if(!mod) scorriVoci(G, function(c){ if(!mod && isTix(c)) mod = c; });
+        if(!mod) return;
+        tieni = clone(mod); tieni.uid = "tz" + uidNuovo(); tieni.on = false; tieni.pdf = null;
+      } else if(dati){
+        Object.keys(dati).forEach(function(k){ if(k !== "uid") tieni[k] = clone(dati[k]); });
+      } else if(!conPrezzo(tieni) && modello){
+        tieni.prezzoConf = modello.prezzoConf;
+        if(!(Number(tieni.kgConf) > 0) && Number(modello.kgConf) > 0) tieni.kgConf = modello.kgConf;
+        if(!tieni.desc && modello.desc) tieni.desc = modello.desc;
+      }
+      v.voci.filter(function(c){ return isTix(c) && c !== tieni; }).forEach(function(c){ attDel(c.uid); });
+      v.voci = v.voci.filter(function(c){ return !isTix(c); });
+      var k = v.voci.findIndex(function(c){ return /^UNI-PRIMER/i.test(String(c.nome||"").trim()); });
+      v.voci.splice(k >= 0 ? k + 1 : 0, 0, tieni);
+      fatti++;
+    });
+  });
+  save("pavpro.migra.tixcem.v1", {quando:new Date().toISOString(), fatti:fatti});
+  if(fatti) salvaListino();
+  return fatti;
+}
 /* E, una volta sola, nel Pavimento Terrazzo entrano UNI-PRIMER 280 NEW,
    PRIMER A300, QUARZO 0,1-0,3 (legato al ghiaino del Terrazzo) e CERA MT,
    presi come sono negli altri sistemi. Chi c'e' gia' non si duplica. */
@@ -7703,8 +7745,9 @@ if(!CLIENTE){
     var tz4 = aggiungiProdottiTerrazzo();
     var tz5 = sistemaGhiainoTerrazzo();
     var tz6 = sistemaCeraTerrazzo();
+    var tz7 = sistemaTixCem();
     var ros = rimettiRosoni();
-    if(tz || tz4 || tz5 || tz6 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
+    if(tz || tz4 || tz5 || tz6 || tz7 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
     tz = tz || tz4;
     disegnaSpazio();
     disegna();                 // le foto dei sistemi stanno nell'archivio: ora ci sono
