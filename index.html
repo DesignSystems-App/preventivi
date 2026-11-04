@@ -236,9 +236,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .copiada{flex-basis:100%; margin-top:8px; padding-top:10px; border-top:1px dashed var(--line-strong)}
 .copiada select{max-width:100%; flex:1 1 220px}
 /* sul listino di un cliente si toccano solo i prezzi: il resto si vede ma non si cambia */
-.soloprezzi .editgrid input:not([data-ed="prezzoConf"]):not([data-cfpz]):not([data-cpz]),
-.soloprezzi .editgrid select, .soloprezzi .editgrid textarea{pointer-events:none; opacity:.5; background:var(--surface-2)}
-.soloprezzi .editgrid button, .soloprezzi .editgrid label.filepick, .soloprezzi .editgrid .btnrow{display:none}
+/* sul listino di un cliente i campi dei prezzi sono evidenziati: quelli restano suoi, il resto va a tutti */
 .soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz]{
   border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
 .installa{border-color:var(--accent); background:var(--accent-soft)}
@@ -1882,6 +1880,48 @@ function clienteListino(){
   if(!cliListino) return null;
   return clienti.find(function(c){ return c.id === cliListino; }) || null;
 }
+/* Copia sul listino generale tutto quello che e' stato cambiato sul listino di un cliente,
+   tranne i prezzi che il cliente ha suoi (prezzo del prodotto, delle confezioni, dei colori). */
+function riportaSulGenerale(){
+  var c = clienteListino(), G = LISTINO_GEN; if(!c || !G) return;
+  var ov = c.voci || {};
+  var ordineG = {};
+  listino.gruppi.forEach(function(g, i){
+    ordineG[g.id] = i;
+    var gg = G.gruppi.find(function(x){ return x.id === g.id; });
+    if(!gg){ G.gruppi.push(clone(g)); return; }
+    ["nome","nota","labelVar","bozza","foto","spessori"].forEach(function(k){ if(g[k] !== undefined) gg[k] = clone(g[k]); else delete gg[k]; });
+    var vari = [];
+    g.varianti.forEach(function(v){
+      var vv = gg.varianti.find(function(x){ return x.id === v.id; });
+      if(!vv){ vari.push(clone(v)); return; }
+      vv.nome = v.nome; if(v.sconto !== undefined) vv.sconto = v.sconto;
+      var nuove = [];
+      v.voci.forEach(function(cv){
+        var cg = vv.voci.find(function(x){ return x.uid === cv.uid; });
+        if(!cg){ nuove.push(clone(cv)); return; }
+        var o = ov[cv.uid] || {};
+        var confsPrima = cg.confs || [], coloriPrima = cg.colori || [], prezzoPrima = cg.prezzoConf;
+        Object.keys(cg).forEach(function(k){ if(k !== "uid" && !(k in cv)) delete cg[k]; });
+        Object.keys(cv).forEach(function(k){ if(k !== "uid") cg[k] = clone(cv[k]); });
+        if("prezzoConf" in o) cg.prezzoConf = prezzoPrima;
+        if(o.confs && Array.isArray(cg.confs)) cg.confs.forEach(function(z){
+          if(z && z.id in o.confs){ var z0 = confsPrima.find(function(y){ return y.id === z.id; }); if(z0) z.prezzo = z0.prezzo; }
+        });
+        if(o.colori && Array.isArray(cg.colori)) cg.colori.forEach(function(k){
+          if(k && k.n in o.colori){ var k0 = coloriPrima.find(function(y){ return y.n === k.n; }); if(k0) k.prezzo = k0.prezzo; }
+        });
+        nuove.push(cg);
+      });
+      vv.voci = nuove;
+      vari.push(vv);
+    });
+    gg.varianti = vari;
+  });
+  G.gruppi = G.gruppi.filter(function(gg){ return ordineG[gg.id] !== undefined; });
+  G.gruppi.sort(function(a, b){ return ordineG[a.id] - ordineG[b.id]; });
+  G.collegamenti = clone(listino.collegamenti || []);
+}
 function salvaVociCliente(){
   var c = clienteListino();
   if(!c) return;
@@ -1892,8 +1932,9 @@ function salvaVociCliente(){
     segnalaSalvataggio(JSON.stringify(c.voci).length);
     var el = $("cliListinoMsg");
     el.className = "msg err";
-    el.textContent = "Salvato solo per " + (c.nome||"questo cliente") + ": "
-      + (n ? n + " prodott" + (n>1?"i":"o") + " con dati suoi." : "nessun prodotto diverso dal listino generale.");
+    el.textContent = "Prezzi salvati solo per " + (c.nome||"questo cliente") + ": "
+      + (n ? n + " prodott" + (n>1?"i":"o") + " con prezzi suoi." : "nessun prezzo diverso dal listino generale.")
+      + " Colori, confezioni e descrizioni vanno sul listino generale, per tutti.";
   }
 }
 function apriListinoDi(id){
@@ -1948,7 +1989,7 @@ function disegnaBarraCli(){
   if(c){
     var q = c.voci ? Object.keys(c.voci).length : 0;
     m.className = "msg err";
-    m.textContent = "Per " + (c.nome||"questo cliente") + " cambi solo i prezzi: confezioni, consumi e descrizioni restano quelli generali. "
+    m.textContent = "Per " + (c.nome||"questo cliente") + " i prezzi che scrivi sono solo suoi; colori, confezioni, consumi e descrizioni vanno sul listino generale, per tutti. "
       + (q ? q+" prodott"+(q>1?"i":"o")+" con un prezzo suo." : "Per ora nessun prezzo diverso dal generale.");
   } else {
     m.className = "msg";
@@ -2117,7 +2158,12 @@ function sincronizzaGemelli(){
 function salvaListino(){
   if(CLIENTE) return;                 // l'app cliente non modifica niente, quindi non salva niente
   aggiornaElencoProdotti(listinoGenerale());   // un prodotto nuovo entra subito negli sconti per prodotto
-  if(cliListino){ salvaVociCliente(); return; }   // stiamo sul listino di un cliente
+  if(cliListino){
+    /* stiamo sul listino di un cliente: i prezzi restano suoi, tutto il resto (colori,
+       confezioni, descrizioni, prodotti nuovi…) va sul listino generale e vale per tutti (SER, 04/11) */
+    salvaVociCliente();
+    riportaSulGenerale();
+  }
   sincronizzaGemelli();
   sincronizzaCollegati();
   var m = calcolaModifiche();
@@ -3480,13 +3526,12 @@ function disegnaRighe(r){
       + cat
       + '</div>';
   }).join("");
-  /* sul listino di un cliente si cambiano solo i prezzi: gli altri campi sono spenti davvero
-     (non solo bloccati al mouse: col tasto Tab ci si arrivava lo stesso e la modifica andava persa) */
+  /* sul listino di un cliente: i prezzi (campi evidenziati) restano suoi; tutto il resto
+     — colori, confezioni, consumi, descrizioni, prodotti nuovi — va sul listino generale e vale per tutti */
   if(cliListino){
-    $("righe").querySelectorAll('.row.soloprezzi .editgrid input:not([data-ed="prezzoConf"]):not([data-cfpz]):not([data-cpz]), .row.soloprezzi .editgrid select, .row.soloprezzi .editgrid textarea').forEach(function(el){ el.disabled = true; });
     $("righe").querySelectorAll('.row.soloprezzi .editgrid').forEach(function(eg){
       var av = document.createElement("p"); av.className = "hint full"; av.style.margin = "0 0 8px";
-      av.innerHTML = 'Qui cambi solo i <b>prezzi di questo cliente</b>. Colori, confezioni, consumi e descrizioni si cambiano sul <b>Listino generale \u2014 vale per tutti</b> (in alto) e valgono per tutti i clienti.';
+      av.innerHTML = 'I <b>prezzi</b> (campi evidenziati) valgono solo per questo cliente. Tutto il resto \u2014 colori, confezioni, consumi, descrizioni \u2014 va sul <b>listino generale</b> e vale per tutti i clienti.';
       eg.insertBefore(av, eg.firstChild);
     });
   }
