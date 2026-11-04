@@ -7536,6 +7536,31 @@ function sistemaGhiainoTerrazzo(){
   if(fatti) salvaListino();
   return fatti;
 }
+/* 04/11, una volta sola: la CERA MT copiata nel Pavimento Terrazzo diventa come quella
+   del Micro topp (nome "CERA MT", tasti LUCIDA / OPACA). Confezione, prezzo e
+   descrizione scritti da SER restano. */
+function sistemaCeraTerrazzo(){
+  if(load("pavpro.terrazzo.v6", null)) return 0;
+  var g = (listinoGenerale().gruppi || []).find(function(x){ return /terrazz/i.test(String(x.nome||"")); });
+  if(!g) return 0;
+  var modello = null;
+  (LISTINO_BASE.gruppi || []).forEach(function(gb){ (gb.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){ if(c.uid === "mt1i") modello = c; }); }); });
+  if(!modello) return 0;
+  var fatti = 0;
+  (g.varianti || []).forEach(function(v){
+    (v.voci || []).forEach(function(c){
+      if(!/^CERA MT/i.test(String(c.nome||"").trim())) return;
+      if(c.finiture && c.finiture.length) return;
+      c.nome = modello.nome;
+      c.finiture = clone(modello.finiture);
+      if(!c.role) c.role = modello.role;
+      fatti++;
+    });
+  });
+  save("pavpro.terrazzo.v6", {quando:new Date().toISOString(), gruppo:g.id, fatti:fatti});
+  if(fatti) salvaListino();
+  return fatti;
+}
 /* E, una volta sola, nel Pavimento Terrazzo entrano UNI-PRIMER 280 NEW,
    PRIMER A300, QUARZO 0,1-0,3 (legato al ghiaino del Terrazzo) e CERA MT,
    presi come sono negli altri sistemi. Chi c'e' gia' non si duplica. */
@@ -7677,8 +7702,9 @@ if(!CLIENTE){
     var tz = aggiungiGhiainoTerrazzo();
     var tz4 = aggiungiProdottiTerrazzo();
     var tz5 = sistemaGhiainoTerrazzo();
+    var tz6 = sistemaCeraTerrazzo();
     var ros = rimettiRosoni();
-    if(tz || tz4 || tz5 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
+    if(tz || tz4 || tz5 || tz6 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
     tz = tz || tz4;
     disegnaSpazio();
     disegna();                 // le foto dei sistemi stanno nell'archivio: ora ci sono
