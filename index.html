@@ -423,6 +423,8 @@ body.attivazione #confermaBox #lingue{display:flex !important; margin:0 0 14px}
 details.card > summary{cursor:pointer; font-family:var(--font-display); font-weight:700; font-size:15px; list-style:none}
 details.card > summary::-webkit-details-marker{display:none}
 details.card > summary::after{content:" \25BE"; color:var(--muted)}
+#cardVista > summary{font-size:13px; color:var(--muted); font-weight:600}
+#cardVista[open] > summary{color:var(--fg)}
 .bar{height:6px; background:var(--surface-3); border-radius:999px; overflow:hidden; margin-top:6px}
 .bar span{display:block; height:100%; background:var(--accent)}
 @media print{ #firma{border:1px solid #999} .firmariga{display:none!important}
@@ -475,9 +477,9 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
     <div class="cols">
       <div>
         
-        <div class="card" id="cardVista">
-            <h2>Mostra</h2>
-            <div class="chips" id="vista">
+        <details class="card" id="cardVista">
+            <summary>Mostra</summary>
+            <div class="chips" id="vista" style="margin-top:10px">
               <button class="chip" type="button" data-vista="tutto" aria-pressed="true">I miei prezzi</button>
               <button class="chip" type="button" data-vista="cliente" aria-pressed="false">Totale per il mio cliente</button>
               <button class="chip" type="button" data-vista="niente" aria-pressed="false">Niente prezzi</button>
@@ -489,7 +491,7 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
               <p class="hint" style="margin:6px 0 0">Il tuo cliente vede solo questo totale, con il ricarico: i tuoi prezzi, lo sconto e il riepilogo restano nascosti finché non torni su "I miei prezzi".</p>
             </div>
             <p class="hint" id="vistaHint" hidden style="margin:6px 0 0">Nessun prezzo in pagina: per vederli torna su "I miei prezzi".</p>
-          </div>
+          </details>
         <div class="card">
           <h2>Sistema</h2>
           <div class="chips" id="gruppi"></div>
@@ -5394,7 +5396,7 @@ function righeListinoPdf(){
 function pdfListino(){
   var d = new PdfDoc(), oggi = new Date(), grigio = "0.35 0.35 0.35";
   var cl = clienteListino();
-  var titolo = cl ? "Listino prezzi \u2014 " + (cl.nome || "cliente") : "Listino prezzi generale";
+  var titolo = cl ? "Listino prezzi riservato" : "Listino prezzi generale";
   d.testo((AZIENDA.nome || "Design Systems Srl"), d.m, 10, true);
   d.testo("LISTINO", 0, 10, true, {destra:d.W - d.m});
   d.y -= 13;
@@ -5402,6 +5404,17 @@ function pdfListino(){
   d.testo(oggi.toLocaleDateString("it-IT"), 0, 8, false, {destra:d.W - d.m, colore:grigio});
   d.vuoto(8); d.linea(1, "0.2"); d.vuoto(4);
   d.riga(titolo, 16, true);
+  d.vuoto(4);
+  d.riga("CLIENTE", 8, true, {colore:grigio});
+  if(cl){
+    d.riga(pulisciTesto(cl.nome || "(senza nome)"), 12, true);
+    if(cl.tel)  d.riga("WhatsApp " + cl.tel, 9.5, false);
+    if(cl.mail) d.riga("Email " + cl.mail, 9.5, false);
+    d.riga((cl.code ? "Codice " + cl.code : "") + (Number(cl.base) > 0 ? (cl.code ? "  \u00b7  " : "") + "sconto riservato " + N(cl.base) + "%" : ""), 9, false, {colore:grigio});
+  } else {
+    d.riga("Listino generale \u2014 vale per tutti i clienti", 11, true);
+  }
+  d.vuoto(6);
   d.riga("Prezzi a confezione, IVA esclusa, imballo e trasporto esclusi. " + (cl ? "Lo sconto del codice cliente si applica al momento dell\u2019ordine." : ""), 8.5, false, {colore:grigio});
   d.vuoto(6);
   var righe = righeListinoPdf(), ultimo = "";
