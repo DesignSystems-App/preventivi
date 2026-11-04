@@ -3741,6 +3741,12 @@ $("spessori").addEventListener("click", function(e){
 });
 $("selCliListino").addEventListener("change", function(e){ apriListinoDi(e.target.value || null); });
 $("btnTornaGen").addEventListener("click", function(){ apriListinoDi(null); });
+$("btnPdfListino").addEventListener("click", function(){
+  var cl = clienteListino();
+  var nome = "Listino-" + (cl ? String(cl.nome||"cliente").replace(/[^A-Za-z0-9]+/g, "-") : "generale") + "-" + new Date().toISOString().slice(0,10) + ".pdf";
+  try{ scaricaBlob(pdfListino(), nome); $("cliListinoMsg").className = "msg ok"; $("cliListinoMsg").textContent = "PDF del listino scaricato: " + nome; }
+  catch(e){ $("cliListinoMsg").className = "msg err"; $("cliListinoMsg").textContent = "Non riesco a fare il PDF: " + e.message; }
+});
 $("mq").addEventListener("input", function(e){ S.mq = Number(e.target.value); salvaSel(); disegna(); });
 $("scarto").addEventListener("input", function(e){ S.scarto = Number(e.target.value); salvaSel(); disegna(); });
 $("mq").value = S.mq; $("scarto").value = S.scarto;
@@ -5320,6 +5326,92 @@ function firmaJpeg(){
   return {b64:c2.toDataURL("image/jpeg", 0.85).split(",")[1], w:c2.width, h:c2.height};
 }
 function pdfOrdine(){ return pdfOrdineGrafico(); }
+/* Il listino in PDF (SER, 04/11): tutti i prodotti del listino aperto — generale o di un cliente —
+   con nome, confezione e prezzo, in ordine alfabetico, senza ripetere un prodotto che sta in
+   piu' sistemi. Se lo stesso nome ha confezioni o prezzi diversi nei vari sistemi, le righe
+   restano distinte e portano il nome del sistema. */
+function righeListinoPdf(){
+  var righe = {}, perNome = {};
+  function aggiungi(nome, dett, kg, prezzo, sistema){
+    var k = [nome.toUpperCase(), dett.toUpperCase(), kg === null ? "" : kg, prezzo === null ? "" : prezzo].join("|");
+    if(!righe[k]) righe[k] = {nome:nome, dett:dett, kg:kg, prezzo:prezzo, sistemi:[]};
+    if(righe[k].sistemi.indexOf(sistema) < 0) righe[k].sistemi.push(sistema);
+    var pn = nome.toUpperCase() + "|" + dett.toUpperCase(); perNome[pn] = perNome[pn] || {}; perNome[pn][k] = 1;
+  }
+  function pz(v){ return (v===null||v===undefined||v==="") ? null : Number(v); }
+  (listino.gruppi||[]).forEach(function(g){
+    (g.varianti||[]).forEach(function(v){
+      (v.voci||[]).forEach(function(c){
+        if(c.nascosto) return;
+        var nome = pulisciTesto(c.nome || "").trim(); if(!nome) return;
+        var u = String(c.unita||"kg").toLowerCase();
+        if(c.catalogo){
+          var tipi = {campo:"fantasia (conf. da " + N(c.catalogo.mqConf||100) + " m\u00b2)", fascia:"fascia (conf. da " + N(c.catalogo.mlConf||100) + " ml)", rosone:"rosone (al pezzo)", pezzo:"pezzo"};
+          Object.keys(tipi).forEach(function(t){
+            var mod = (c.catalogo.modelli||[]).filter(function(m){ return m.tipo === t; }); if(!mod.length) return;
+            var prezzi = {}; mod.forEach(function(m){ prezzi[String(pz(m.prezzo))] = 1; });
+            var pk = Object.keys(prezzi);
+            if(pk.length === 1) aggiungi(nome, tipi[t], null, pz(mod[0].prezzo), g.nome);
+            else mod.forEach(function(m){ aggiungi(nome, tipi[t] + " \u00b7 " + (m.cod ? m.cod + " " : "") + (m.nome||""), null, pz(m.prezzo), g.nome); });
+          });
+          return;
+        }
+        var fin = (c.finiture||[]).filter(function(z){ return z.on !== false && Number(z.kg) > 0; });
+        var confs = (c.confs||[]).filter(function(z){ return z.on !== false && Number(z.kg) > 0; });
+        if(fin.length) fin.forEach(function(z){ aggiungi(nome, String(z.n||"").toUpperCase() + (z.comp ? " (" + z.comp + ")" : ""), Number(z.kg), pz(z.prezzo) !== null ? pz(z.prezzo) : pz(c.prezzoConf), g.nome); });
+        else if(confs.length) confs.forEach(function(z){ aggiungi(nome, "", Number(z.kg), pz(z.prezzo), g.nome); });
+        else aggiungi(nome, "", Number(c.kgConf) > 0 ? Number(c.kgConf) : null, pz(c.prezzoConf), g.nome);
+        (c.colori||[]).forEach(function(k){
+          if(pz(k.prezzo) === null && !(Number(k.kg) > 0)) return;
+          aggiungi(nome, String(k.n||"").toUpperCase(), Number(k.kg) > 0 ? Number(k.kg) : (Number(c.kgConf) > 0 ? Number(c.kgConf) : null), pz(k.prezzo) !== null ? pz(k.prezzo) : pz(c.prezzoConf), g.nome);
+        });
+      });
+    });
+  });
+  var out = Object.keys(righe).map(function(k){
+    var r = righe[k], gruppo = perNome[r.nome.toUpperCase() + "|" + r.dett.toUpperCase()], chiavi = Object.keys(gruppo);
+    var tutti = []; chiavi.forEach(function(k2){ righe[k2].sistemi.forEach(function(sName){ if(tutti.indexOf(sName) < 0) tutti.push(sName); }); });
+    r.ambiguo = chiavi.length > 1 && r.sistemi.length < tutti.length;   // stesso nome e confezione ma prezzo diverso: si dice in quali sistemi
+    return r;
+  });
+  out.sort(function(a, b){ return a.nome.localeCompare(b.nome, "it") || a.dett.localeCompare(b.dett, "it") || (a.kg||0) - (b.kg||0); });
+  return out;
+}
+function pdfListino(){
+  var d = new PdfDoc(), oggi = new Date(), grigio = "0.35 0.35 0.35";
+  var cl = clienteListino();
+  var titolo = cl ? "Listino prezzi \u2014 " + (cl.nome || "cliente") : "Listino prezzi generale";
+  d.testo((AZIENDA.nome || "Design Systems Srl"), d.m, 10, true);
+  d.testo("LISTINO", 0, 10, true, {destra:d.W - d.m});
+  d.y -= 13;
+  d.testo([AZIENDA.mail, AZIENDA.wa ? "WhatsApp " + AZIENDA.wa : ""].filter(Boolean).join("  \u00b7  "), d.m, 8, false, {colore:grigio});
+  d.testo(oggi.toLocaleDateString("it-IT"), 0, 8, false, {destra:d.W - d.m, colore:grigio});
+  d.vuoto(8); d.linea(1, "0.2"); d.vuoto(4);
+  d.riga(titolo, 16, true);
+  d.riga("Prezzi a confezione, IVA esclusa, imballo e trasporto esclusi. " + (cl ? "Lo sconto del codice cliente si applica al momento dell\u2019ordine." : ""), 8.5, false, {colore:grigio});
+  d.vuoto(6);
+  var righe = righeListinoPdf(), ultimo = "";
+  righe.forEach(function(r){
+    var nome = r.nome + (r.dett ? " \u00b7 " + r.dett : "");
+    var conf = r.kg !== null ? NI(r.kg) + " kg" : "";
+    var prezzo = r.prezzo === null ? "prezzo da inserire" : E(r.prezzo);
+    var nuovo = r.nome.toUpperCase() !== ultimo; ultimo = r.nome.toUpperCase();
+    var maxW = d.W - 2 * d.m - 200, righeNome = pdfSpezza(nome, 10, nuovo, maxW);
+    var righeSist = r.ambiguo ? pdfSpezza("nei sistemi: " + r.sistemi.join(", "), 8, false, maxW) : [];
+    var lh = 10 * 1.35, alt = lh * righeNome.length + 8 * 1.3 * righeSist.length + (nuovo ? 2 : 0) + 10;
+    d.spazio(alt);
+    if(nuovo) d.vuoto(2);
+    d.y -= lh;
+    d.testo(conf, 0, 10, false, {destra:d.W - d.m - 110, colore:grigio});
+    d.testo(prezzo, 0, 10, false, {destra:d.W - d.m});
+    righeNome.forEach(function(t, i){ if(i) d.y -= lh; d.testo(t, d.m, 10, nuovo); });
+    righeSist.forEach(function(t){ d.y -= 8 * 1.3; d.testo(t, d.m, 8, false, {colore:grigio}); });
+    d.linea(0.3, "0.88");
+  });
+  d.vuoto(8);
+  d.riga(righe.length + " righe \u00b7 " + righe.filter(function(r){ return r.prezzo === null; }).length + " senza prezzo", 8, false, {colore:grigio});
+  return new Blob([d.bytes()], {type:"application/pdf"});
+}
 function pdfOrdineTesto(){
   var r = calcola(), d = new PdfDoc(), ordine = (S.modo === "ordine"), oggi = new Date();
   var voci = vociPreventivo(r), grigio = "0.35 0.35 0.35", accento = "0.55 0.33 0.12";
