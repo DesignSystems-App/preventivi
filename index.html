@@ -5358,13 +5358,27 @@ function righeListinoPdf(){
         }
         var fin = (c.finiture||[]).filter(function(z){ return z.on !== false && Number(z.kg) > 0; });
         var confs = (c.confs||[]).filter(function(z){ return z.on !== false && Number(z.kg) > 0; });
-        if(fin.length) fin.forEach(function(z){ aggiungi(nome, String(z.n||"").toUpperCase() + (z.comp ? " (" + z.comp + ")" : ""), Number(z.kg), pz(z.prezzo) !== null ? pz(z.prezzo) : pz(c.prezzoConf), g.nome); });
+        var kgBase = Number(c.kgConf) > 0 ? Number(c.kgConf) : null, pzBase = pz(c.prezzoConf);
+        var colori = (c.colori||[]).filter(function(k){ return String(k.n||"").trim(); });
+        if(colori.some(function(k){ return suoiNumeri(c, k); })){
+          /* i colori hanno prezzi o confezioni loro: vale il prezzo del colore (quello che si vende davvero),
+             non quello scritto sul prodotto; i colori senza numeri propri prendono quelli del prodotto */
+          var perPrezzo = {}, ordine = [];
+          colori.forEach(function(k){
+            var kg = Number(k.kg) > 0 ? Number(k.kg) : kgBase, pr = pz(k.prezzo) !== null ? pz(k.prezzo) : pzBase;
+            var kk = (kg === null ? "" : kg) + "|" + (pr === null ? "" : pr);
+            if(!perPrezzo[kk]){ perPrezzo[kk] = {kg:kg, prezzo:pr, nomi:[]}; ordine.push(kk); }
+            perPrezzo[kk].nomi.push(String(k.n).toUpperCase());
+          });
+          ordine.forEach(function(kk){
+            var q = perPrezzo[kk];
+            aggiungi(nome, q.nomi.length === colori.length ? "tutti i colori" : q.nomi.join(", "), q.kg, q.prezzo, g.nome);
+          });
+          return;
+        }
+        if(fin.length) fin.forEach(function(z){ aggiungi(nome, String(z.n||"").toUpperCase() + (z.comp ? " (" + z.comp + ")" : ""), Number(z.kg), pz(z.prezzo) !== null ? pz(z.prezzo) : pzBase, g.nome); });
         else if(confs.length) confs.forEach(function(z){ aggiungi(nome, "", Number(z.kg), pz(z.prezzo), g.nome); });
-        else aggiungi(nome, "", Number(c.kgConf) > 0 ? Number(c.kgConf) : null, pz(c.prezzoConf), g.nome);
-        (c.colori||[]).forEach(function(k){
-          if(pz(k.prezzo) === null && !(Number(k.kg) > 0)) return;
-          aggiungi(nome, String(k.n||"").toUpperCase(), Number(k.kg) > 0 ? Number(k.kg) : (Number(c.kgConf) > 0 ? Number(c.kgConf) : null), pz(k.prezzo) !== null ? pz(k.prezzo) : pz(c.prezzoConf), g.nome);
-        });
+        else aggiungi(nome, "", kgBase, pzBase, g.nome);
       });
     });
   });
