@@ -237,7 +237,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .copiada select{max-width:100%; flex:1 1 220px}
 /* sul listino di un cliente si toccano solo i prezzi: il resto si vede ma non si cambia */
 /* sul listino di un cliente i campi dei prezzi sono evidenziati: quelli restano suoi, il resto va a tutti */
-.soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz]{
+.soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz], .soloprezzi .editgrid input[data-fnpz]{
   border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
 .installa{border-color:var(--accent); background:var(--accent-soft)}
 /* finche' il link personale non e' attivo si vede solo la pagina di attivazione */
@@ -768,7 +768,7 @@ var LISTINO_BASE = {rev:"slim", gruppi:[{id:"sasso-resinato",nome:"Sasso resinat
 var ALPHA = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 var BASE  = ALPHA.length;
 var SALT  = "pavpro-sconti-2026";
-var PRODOTTI_BASE = ["UNI-PRIMER 280 NEW A+B", "DS-REMUK", "CORNICI E ROSONI", "GHIAINO", "PRIMER A300", "CORPAV", "DS-R", "RE-COLOR", "DS-F", "DS-CS", "POLIMERO 20", "BETON MIX", "DISACAL", "MASBETON", "STENCIL", "POLIRESIN L2", "STARMIX PER SP. 1 CM", "STARMIX PER SP. 1,5 CM", "STARMIX PER SP. 2 CM", "STARMIX PER SP. 2,5 CM", "COLOR STYLE", "RETOP", "PROTEWALL", "MICRO TOPP BS M", "MICRO TOPP MD M", "MICRO TOPP FINE M", "EPOX 645 A+B", "POLTEK A+B", "CERA MT (LUCIDA / OPACA)", "POLTEC A+B", "FERPAV + ACRIL FP", "ANTIQUE VARI COLORI", "PREPOX PRIMER", "TIX-CEM", "PASTA COLORANTE", "EPOSPLAST", "PAVIFLOOR", "QUARZO 0,1-0,3 MM", "SFERE DI VETRO", "CORNICI", "ROSONI", "ANTIQUE", "STAINCOLOR", "LIVIUS-T", "LIVIUS-A"]; /*__PRODOTTI__*/
+var PRODOTTI_BASE = ["UNI-PRIMER 280 NEW A+B", "DS-REMUK", "CORNICI E ROSONI", "GHIAINO", "PRIMER A300", "CORPAV", "DS-R", "RE-COLOR", "DS-F", "DS-CS", "POLIMERO 20", "BETON MIX", "DISACAL", "MASBETON", "STENCIL", "POLIRESIN L2", "STARMIX PER SP. 1 CM", "STARMIX PER SP. 1,5 CM", "STARMIX PER SP. 2 CM", "STARMIX PER SP. 2,5 CM", "COLOR STYLE", "RETOP", "PROTEWALL", "MICRO TOPP BS M", "MICRO TOPP MD M", "MICRO TOPP FINE M", "EPOX 645 A+B", "POLTEK A+B", "CERA MT (LUCIDA / OPACA)", "POLTEC A+B", "FERPAV + ACRIL FP", "ANTIQUE VARI COLORI", "PREPOX PRIMER", "TIX-CEM", "PASTA COLORANTE", "EPOSPLAST", "PAVIFLOOR", "QUARZO 0,1-0,3 MM", "SFERE DI VETRO", "CORNICI", "ROSONI", "ANTIQUE", "STAINCOLOR", "LIVIUS-T", "LIVIUS-A", "DS-POLTEC W"]; /*__PRODOTTI__*/
 var EPOCH = Date.UTC(2026,0,1);
 var GIORNO = 24*3600*1000;
 
@@ -1679,6 +1679,16 @@ function migraFondoUmido(m){
     m.voci.bs1j = clone(m.voci.cs1g); m.voci.bsN1j = clone(m.voci.cs1g);
     save("pavpro.migra.staincolor.v1", {quando:new Date().toISOString()});
   }
+  /* 04/11: EPOX 645 (lucida 7,4 kg 456,20 € / opaca 8 kg 490 €, via la satinata) e POLTEC → DS-POLTEC W
+     (lucida/satinata/opaca da 10 kg, prezzi da inserire): valgono anche sopra le modifiche salvate, una volta sola */
+  if(m.voci && !load("pavpro.migra.finiture.v1", null)){
+    Object.keys(m.voci).forEach(function(uid){
+      var mv = m.voci[uid]; if(!mv) return;
+      if(/^mt[A-Z]?\dg$/.test(uid)){ delete mv.finiture; delete mv.kgConf; delete mv.prezzoConf; }
+      if(/^mt[A-Z]?\dh$/.test(uid)){ delete mv.finiture; delete mv.kgConf; delete mv.prezzoConf; if(/^POLTEC/i.test(String(mv.nome||""))) delete mv.nome; }
+    });
+    save("pavpro.migra.finiture.v1", {quando:new Date().toISOString()});
+  }
   /* 04/11: via i caratteri di controllo dai testi salvati (incollati da PDF) */
   (function pulisciRicorsivo(o, prof){
     if(!o || typeof o !== "object" || prof > 8) return;
@@ -1869,6 +1879,7 @@ function applicaVociCliente(l, voci){
     if("prezzoConf" in o) c.prezzoConf = o.prezzoConf;
     if(o.confs) (c.confs||[]).forEach(function(z){ if(z.id in o.confs) z.prezzo = o.confs[z.id]; });
     if(o.colori) (c.colori||[]).forEach(function(k){ if(k.n in o.colori) k.prezzo = o.colori[k.n]; });
+    if(o.finiture) (c.finiture||[]).forEach(function(z){ if(z.id in o.finiture) z.prezzo = o.finiture[z.id]; });
   });
   return l;
 }
@@ -1888,6 +1899,10 @@ function vociDiverse(l, gen){
     (c.colori||[]).forEach(function(k){
       var bk = (b.colori||[]).find(function(y){ return y.n === k.n; });
       if(bk && prezzoPulito(k.prezzo) !== prezzoPulito(bk.prezzo)){ if(!d) d = {}; d.colori = d.colori || {}; d.colori[k.n] = prezzoPulito(k.prezzo); }
+    });
+    (c.finiture||[]).forEach(function(z){
+      var bz = (b.finiture||[]).find(function(y){ return y.id === z.id; });
+      if(bz && prezzoPulito(z.prezzo) !== prezzoPulito(bz.prezzo)){ if(!d) d = {}; d.finiture = d.finiture || {}; d.finiture[z.id] = prezzoPulito(z.prezzo); }
     });
     if(d) out[c.uid] = d;
   });
@@ -1918,7 +1933,7 @@ function riportaSulGenerale(){
         var cg = vv.voci.find(function(x){ return x.uid === cv.uid; });
         if(!cg){ nuove.push(clone(cv)); return; }
         var o = ov[cv.uid] || {};
-        var confsPrima = cg.confs || [], coloriPrima = cg.colori || [], prezzoPrima = cg.prezzoConf;
+        var confsPrima = cg.confs || [], coloriPrima = cg.colori || [], finPrima = cg.finiture || [], prezzoPrima = cg.prezzoConf;
         Object.keys(cg).forEach(function(k){ if(k !== "uid" && !(k in cv)) delete cg[k]; });
         Object.keys(cv).forEach(function(k){ if(k !== "uid") cg[k] = clone(cv[k]); });
         if("prezzoConf" in o) cg.prezzoConf = prezzoPrima;
@@ -1927,6 +1942,9 @@ function riportaSulGenerale(){
         });
         if(o.colori && Array.isArray(cg.colori)) cg.colori.forEach(function(k){
           if(k && k.n in o.colori){ var k0 = coloriPrima.find(function(y){ return y.n === k.n; }); if(k0) k.prezzo = k0.prezzo; }
+        });
+        if(o.finiture && Array.isArray(cg.finiture)) cg.finiture.forEach(function(z){
+          if(z && z.id in o.finiture){ var f0 = finPrima.find(function(y){ return y.id === z.id; }); if(f0) z.prezzo = f0.prezzo; }
         });
         nuove.push(cg);
       });
@@ -2325,6 +2343,12 @@ function formatiDi(c){
   return (c.confs||[]).filter(function(f){ return f.on !== false && Number(f.kg) > 0; });
 }
 function formatoScelto(c){
+  /* una finitura con la sua confezione (EPOX 645 lucida A 5,4 + B 2 = 7,4 kg a 456,20 €) vince su tutto */
+  var fz = finituraScelta(c);
+  if(fz && Number(fz.kg) > 0){
+    return { id:"fin:" + fz.id, kg:Number(fz.kg),
+             prezzo:(fz.prezzo===null||fz.prezzo===undefined||fz.prezzo==="") ? ((c.prezzoConf===null||c.prezzoConf===undefined||c.prezzoConf==="") ? null : Number(c.prezzoConf)) : Number(fz.prezzo) };
+  }
   var l = formatiDi(c);
   if(!l.length){
     return { id:null, kg:Number(c.kgConf)||0,
@@ -2950,7 +2974,9 @@ function varianti(c){
     return '<div class="vrow">'
       + '<input type="checkbox" data-fnon="'+esc(c.uid)+'|'+esc(z.id)+'"'+(z.on===false?"":" checked")+' aria-label="Disponibile">'
       + '<input type="text" data-fnnome="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(z.n||"")+'" placeholder="lucida" style="text-align:left" aria-label="Nome della finitura">'
-      + '<span></span><span class="vresa"></span>'
+      + '<input type="text" inputmode="decimal" data-fnkg="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(NI(z.kg))+'" placeholder="'+esc(u||"kg")+' conf." title="Confezione di questa finitura (vuoto = come il prodotto)" aria-label="Confezione della finitura">'
+      + '<input type="text" inputmode="decimal" data-fnpz="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(NI(z.prezzo))+'" placeholder="\u20ac" title="Prezzo di questa finitura (vuoto = come il prodotto)" aria-label="Prezzo della finitura">'
+      + '<input type="text" data-fncomp="'+esc(c.uid)+'|'+esc(z.id)+'" value="'+esc(z.comp||"")+'" placeholder="A 5,4 kg + B 2 kg" title="Componenti, solo da mostrare" aria-label="Componenti" style="text-align:left">'
       + '<button class="step" type="button" data-fndel="'+esc(c.uid)+'|'+esc(z.id)+'" aria-label="Togli questa finitura">\u00d7</button>'
       + '</div>';
   }).join("");
@@ -3105,8 +3131,11 @@ function sceltaVarianti(c){
     var fsc = finituraScelta(c);
     out += '<div class="granu"><span class="colscelto">Finitura: <b>'+esc(fsc.n)+'</b></span>'
       + lfin.map(function(z){
+          var dett = [];
+          if(Number(z.kg) > 0) dett.push(NI(z.kg) + ' ' + u + (z.comp ? ' (' + z.comp + ')' : ''));
+          if(prezziVisibili() && z.prezzo !== null && z.prezzo !== undefined && z.prezzo !== "") dett.push(E(Number(z.prezzo)));
           return '<button class="chip" type="button" data-fnsel="'+esc(c.uid)+'|'+esc(z.id)+'"'
-               + ' aria-pressed="'+(z.id===fsc.id)+'">'+esc(z.n)+'</button>';
+               + ' aria-pressed="'+(z.id===fsc.id)+'">'+esc(z.n)+(dett.length ? ' <small style="opacity:.8;text-transform:none;letter-spacing:0">\u00b7 '+esc(dett.join(' \u00b7 '))+'</small>' : '')+'</button>';
         }).join("")
       + '</div>';
   }
@@ -4337,6 +4366,19 @@ $("righe").addEventListener("input", function(e){
     return;
   }
 
+  var ff = e.target.closest("[data-fnkg],[data-fnpz],[data-fncomp]");
+  if(ff){
+    var qualeFn = ff.hasAttribute("data-fnkg") ? "kg" : (ff.hasAttribute("data-fnpz") ? "prezzo" : "comp");
+    var pfz = ff.getAttribute("data-fn" + (qualeFn === "kg" ? "kg" : (qualeFn === "prezzo" ? "pz" : "comp"))).split("|");
+    var vfz = vocePerUid(pfz[0]);
+    var rfz = vfz && (vfz.finiture||[]).find(function(z){ return z.id === pfz[1]; });
+    if(rfz){
+      if(qualeFn === "comp") rfz.comp = pulisciTesto(ff.value);
+      else { var nfz = numIt(ff.value); if(nfz === null || isNaN(nfz)) delete rfz[qualeFn]; else rfz[qualeFn] = nfz; }
+      salvaListino(); patchRiga(pfz[0], "variante");
+    }
+    return;
+  }
   var cf = e.target.closest("[data-cfkg],[data-cfpz]");
   if(cf){
     var qualeF = cf.hasAttribute("data-cfkg") ? "kg" : "prezzo";
