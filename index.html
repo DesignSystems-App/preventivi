@@ -3386,9 +3386,7 @@ function disegnaRighe(r){
       + '<div class="full"><label class="l">Avviso in neretto</label><input type="text" data-ed="avviso" data-i="'+esc(c.uid)+'" value="'+esc(c.avviso||"")+'" placeholder="produzione a richiesta: chiedere i tempi…"></div>'
       + varianti(c)
       + granuloEdit(c)
-      + (cliListino
-          ? '<p class="msg err full" style="margin:0">Per '+esc((clienteListino()||{}).nome||"questo cliente")+' cambi solo i prezzi: confezioni, consumi, nomi e descrizioni sono quelli del listino generale, uguali per tutti.</p>'
-          : '<div class="full collega">'
+      + ('<div class="full collega">'
             + '<label class="l">Metti questo prodotto anche in un altro sistema</label>'
             + '<div class="btnrow" style="margin-top:4px"><select data-colsis="'+esc(c.uid)+'"><option value="">\u2014 scegli il sistema \u2014</option>'
             + listinoGenerale().gruppi.filter(function(g2){ return g2.id !== gruppoCorrente().id && !(g2.varianti||[]).some(function(v2){ return (v2.voci||[]).some(function(z){ return z.uid === c.uid || collegatoDa(z.uid) === c.uid || (collegatoDa(c.uid) && (z.uid === collegatoDa(c.uid) || collegatoDa(z.uid) === collegatoDa(c.uid))); }); }); })
@@ -3474,11 +3472,8 @@ function disegnaRighe(r){
             + '</div>';
         }).join("");
       }
-      if(S.gestione && cliListino){
-        cat += '<h5 style="margin-top:16px">Prezzi di listino <em>si cambiano sul listino generale</em></h5>';
-      }
-      if(S.gestione && !cliListino){
-        cat += '<h5 style="margin-top:16px">Prezzi di listino <em>solo tu li vedi e li cambi</em></h5>'
+      if(S.gestione){
+        cat += '<h5 style="margin-top:16px">Prezzi di listino <em>solo tu li vedi e li cambi' + (cliListino ? ' \u2014 valgono per tutti i clienti' : '') + '</em></h5>'
           + '<div class="prezzimod">'
           + ["campo","rosone","fascia","pezzo"].map(function(t){
               var et = t==="campo" ? "Tutte le fantasie" : (t==="rosone" ? "Tutti i rosoni"
