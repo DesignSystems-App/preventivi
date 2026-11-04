@@ -912,6 +912,10 @@ var MEMORIA_OK = (function(){
 function load(k, def){ try{ var v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){ return def; } }
 function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 function drop(k){ try{ localStorage.removeItem(k); }catch(e){} }
+/* I testi incollati da un PDF possono portare caratteri di controllo (U+0001 al posto degli
+   spazi): sullo schermo diventano quadratini. Qui si puliscono ovunque si scrive un testo. */
+var RE_CONTROLLO = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]+/g;
+function pulisciTesto(s){ return String(s===null||s===undefined?"":s).replace(RE_CONTROLLO, " ").replace(/ {2,}/g, " "); }
 function clone(o){ return JSON.parse(JSON.stringify(o)); }
 function uidNuovo(){ return "x"+Math.random().toString(36).slice(2,9); }
 
@@ -1660,6 +1664,15 @@ function migraTavolaMicroTopp(m){
    finche' non le cambia direttamente sul fondo umido */
 function migraFondoUmido(m){
   if(!m || typeof m !== "object") return m;
+  /* 04/11: via i caratteri di controllo dai testi salvati (incollati da PDF) */
+  (function pulisciRicorsivo(o, prof){
+    if(!o || typeof o !== "object" || prof > 8) return;
+    Object.keys(o).forEach(function(k){
+      var v = o[k];
+      if(typeof v === "string"){ if(RE_CONTROLLO.test(v)){ RE_CONTROLLO.lastIndex = 0; o[k] = pulisciTesto(v); } RE_CONTROLLO.lastIndex = 0; }
+      else if(v && typeof v === "object" && !/^(img|pdf|foto|b64|dati)$/.test(k)) pulisciRicorsivo(v, prof + 1);
+    });
+  })(m, 0);
   /* 03/11: SER ha cancellato per sbaglio il NERO dalla cartella del RE-COLOR: si rimette una volta
      sola, preso dalla tavola di fabbrica (la stessa dell'ANTIQUE), al suo posto in cima */
   if(m.voci && !load("pavpro.migra.recolor.nero.v1", null)){
@@ -2691,7 +2704,7 @@ function calcola(){
 /* nell'app cliente i pezzi di gestione non esistono proprio nel file:
    questa versione di $ restituisce un elemento finto invece di far saltare tutto */
 var $ = function(id){ return document.getElementById(id) || document.createElement("span"); };
-function esc(s){ return String(s===null||s===undefined?"":s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+function esc(s){ return pulisciTesto(s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
 function avvisa(t){ var m=$("copyMsg"); if(m){ m.className="msg err"; m.textContent=t; } }
 
 function disegnaGruppi(){
@@ -4182,7 +4195,7 @@ $("righe").addEventListener("input", function(e){
     var cd = vocePerUid(d.getAttribute("data-desc"));
     if(cd){
       var primaD = String(cd.desc || "");
-      cd.desc = d.value;
+      cd.desc = pulisciTesto(d.value);
       allineaDescrizione(cd, primaD);     // la stessa descrizione su tutti gli omonimi
       salvaListino();
     }
@@ -4328,7 +4341,7 @@ $("righe").addEventListener("input", function(e){
     var campo = ed.getAttribute("data-ed");
     var voce = vocePerUid(ed.getAttribute("data-i"));
     if(!voce) return;
-    if(campo==="nome" || campo==="role" || campo==="unita" || campo==="nota" || campo==="avviso") voce[campo] = ed.value;
+    if(campo==="nome" || campo==="role" || campo==="unita" || campo==="nota" || campo==="avviso") voce[campo] = pulisciTesto(ed.value);
     else if(campo==="prezzoConf") voce.prezzoConf = numIt(ed.value);
     else if(campo==="resa"){
       var resa = numIt(ed.value);
@@ -5057,7 +5070,7 @@ function testoRiepilogo(){
   if(ordine && AZIENDA.condizioni){ L.push(""); L.push("CONDIZIONI DI VENDITA"); String(AZIENDA.condizioni).split("\n").forEach(function(r){ L.push("  " + r); }); }
   var legale = rigaLegale(" \u00b7 ");
   if(legale){ L.push(""); L.push(legale); }
-  return traduciRighe(L.join("\n"));
+  return pulisciTesto(traduciRighe(L.join("\n")));
 }
 /* c'e' almeno una voce con colori scelti? (per l'avvertenza sui colori nell'ordine) */
 function ordineConColori(r){
@@ -5281,6 +5294,7 @@ function telaOrdine(){
     function testo(t, x, yy, opz){
       opz = opz || {}; g.fillStyle = opz.col || C.fg; g.textAlign = opz.destra ? "right" : "left"; g.textBaseline = "alphabetic";
       if(!opz.it) t = traduciTesto(t);
+      t = pulisciTesto(t);
       if(!soloMisura) g.fillText(t, x, yy);
     }
     function para(t, x, maxW, lh, opz){
