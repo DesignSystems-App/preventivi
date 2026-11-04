@@ -1517,7 +1517,7 @@ function incluso(c){
    a qualunque versione nuova dell'app e pesano pochi KB invece di uno
    o due megabyte.
    ============================================================ */
-var CAMPI_VOCE = ["nome","role","unita","consumoMq","kgConf","prezzoConf","on","desc","descSolo","link","avviso","nota","colori","fotoTit","pdf","granulo","confs","consumi","finiture","perc","dipende"];
+var CAMPI_VOCE = ["nome","role","unita","consumoMq","kgConf","prezzoConf","on","desc","descSolo","link","avviso","nota","colori","fotoTit","pdf","granulo","confs","consumi","finiture","perc","dipende","nascosto"];
 
 function indiceBase(){
   var gruppi = {}, varianti = {}, voci = {};
@@ -2680,7 +2680,7 @@ function calcola(){
   var mqEff = mq * (1 + sc/100);
   var righe = [], lordo = 0, scontoTot = 0, senzaPrezzo = 0, aliquote = {};
 
-  v.voci.forEach(function(c){
+  v.voci.filter(vocePresente).forEach(function(c){
     if(c.catalogo){                       // voce a catalogo: il costo viene dai modelli scelti
       var scelte = S.stencil[c.uid] || {};
       var mod = [], costoTot = 0, senza = 0;
@@ -3277,7 +3277,7 @@ function patchRiga(uid, campo){
     });
     return;
   }
-  if((el = row.querySelector(".rname"))) el.innerHTML = esc(c.nome)+(x.forzata?'<span class="warnflag">a mano</span>':'');
+  if((el = row.querySelector(".rname"))) el.innerHTML = esc(c.nome)+(x.forzata?'<span class="warnflag">a mano</span>':'')+(c.nascosto?'<span class="warnflag" style="background:var(--signal);color:#fff">nascosto ai clienti</span>':'');
   if((el = row.querySelector(".rrole"))) el.textContent = c.role;
   if((el = row.querySelector(".rdata"))) el.textContent = testoDati(c, x);
   if((el = row.querySelector(".rprice"))) el.innerHTML = (x.on ? E(x.costo) : "—")+'<span class="sub">'+x.conf+' conf.</span>';
@@ -3354,6 +3354,7 @@ function disegnaRighe(r){
 
     var edit = (S.gestione && S.modifica===c.uid) ? (
       '<div class="editgrid">'
+      + '<div class="full"><label class="chk" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-nascondi="'+esc(c.uid)+'"'+(c.nascosto?' checked':'')+'><span><b>Nascondi ai clienti</b> (per esempio problemi di approvvigionamento): non lo vedono e non entra nei conti. Qui in gestione resta, segnato, e si rimette togliendo la spunta.</span></label></div>'
       + '<div class="full"><label class="l">Nome prodotto</label><input type="text" data-ed="nome" data-i="'+esc(c.uid)+'" value="'+esc(c.nome)+'"></div>'
       + '<div class="full"><label class="l">Descrizione breve</label><input type="text" data-ed="role" data-i="'+esc(c.uid)+'" value="'+esc(c.role)+'"></div>'
       + '<div><label class="l">Unità</label><input type="text" data-ed="unita" data-i="'+esc(c.uid)+'" value="'+esc(c.unita)+'"></div>'
@@ -3511,7 +3512,7 @@ function disegnaRighe(r){
     return '<div class="row'+(x.on?"":" off")+(cliListino?" soloprezzi":"")+'" data-row="'+esc(c.uid)+'">'
       + '<div class="tick"><input type="checkbox" data-on="'+esc(c.uid)+'" '+(x.on?"checked":"")+' aria-label="Serve '+esc(c.nome)+'"></div>'
       + '<div>'
-        + '<div class="rname">'+esc(c.nome)+(x.forzata?'<span class="warnflag">a mano</span>':'')+'</div>'
+        + '<div class="rname">'+esc(c.nome)+(x.forzata?'<span class="warnflag">a mano</span>':'')+(c.nascosto?'<span class="warnflag" style="background:var(--signal);color:#fff">nascosto ai clienti</span>':'')+'</div>'
         + (c.role ? '<div class="rrole">'+esc(c.role)+'</div>' : '')
         + rigaColore
         + '<div class="rdata">'+dati+'</div>'
@@ -3773,6 +3774,9 @@ $("noteOrd").addEventListener("input", function(e){ S.note = e.target.value; sal
 $("waNum").addEventListener("input", function(e){ S.wa = e.target.value; salvaSel(); aggiornaInvii(calcola()); });
 $("mailDest").addEventListener("input", function(e){ S.mail = e.target.value; salvaSel(); aggiornaInvii(calcola()); });
 
+/* Un prodotto "nascosto" (problemi di approvvigionamento, SER 04/11) resta nel listino ma il
+   cliente non lo vede e non entra nei conti; in gestione si vede, segnato, e si puo' rimettere. */
+function vocePresente(c){ return !c.nascosto || !!S.gestione; }
 function vociCorrenti(){ return varianteCorrente().voci; }
 function vocePerUid(uid){ return vociCorrenti().find(function(c){ return c.uid===uid; }); }
 
@@ -4093,6 +4097,8 @@ $("righe").addEventListener("change", function(e){
     }
     return;
   }
+  var nas = e.target.closest("[data-nascondi]");
+  if(nas){ var vn = vocePerUid(nas.getAttribute("data-nascondi")); if(vn){ if(nas.checked) vn.nascosto = true; else delete vn.nascosto; salvaListino(); disegna(); } return; }
   var on = e.target.closest("[data-on]");
   if(on){
     var c = vocePerUid(on.getAttribute("data-on"));
@@ -4875,7 +4881,7 @@ function statoDelSistema(g){
   var mancano = 0, tot = 0;
   g.varianti.forEach(function(v){
     v.voci.forEach(function(c){
-      if(!c.on) return;
+      if(!c.on || c.nascosto) return;
       tot++;
       if(c.catalogo){
         var senza = (c.catalogo.modelli||[]).filter(function(m){ return m.prezzo===null || m.prezzo===undefined || m.prezzo===""; }).length;
