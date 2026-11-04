@@ -3699,12 +3699,13 @@ function disegna(){
   disegnaLock();
   disegnaRiepilogo(r);
   disegnaBarraCli();
-  $("rowAdd").hidden = !S.gestione || !!cliListino;   // voci nuove solo sul listino generale
+  $("rowAdd").hidden = !S.gestione;   // anche sul listino di un cliente: il prodotto nuovo va sul listino generale (SER, 04/11)
   if(S.gestione){
     var gg = gruppoCorrente(), vv = varianteCorrente();
     $("doveAddVoce").textContent = "Finisce in \u00ab" + gg.nome
       + (gg.varianti.length > 1 ? " \u2014 " + vv.nome : "") + "\u00bb, dove potrai scrivere consumo, confezione, prezzo e scheda. "
-      + "Nasce spuntato: la spunta a sinistra lo toglie dall\u2019ordine.";
+      + "Nasce spuntato: la spunta a sinistra lo toglie dall\u2019ordine."
+      + (cliListino ? " Vale per tutti i clienti, non solo per questo." : "");
   }
   $("vuoto").hidden = !!varianteCorrente().voci.length;
   $("sfridoBox").hidden = !S.gestione;
@@ -4517,13 +4518,7 @@ function mettiInTutteLeSchede(voce){
 }
 
 function aggiungiProdotto(){
-  if(cliListino){
-    var m = $("cliListinoMsg");
-    m.className = "msg err";
-    m.textContent = "I prodotti si aggiungono al listino generale, non a quello di un cliente: torna al generale e riprova.";
-    $("barraCli").scrollIntoView({block:"start", behavior:"smooth"});
-    return;
-  }
+  /* anche dal listino di un cliente: il prodotto nuovo finisce sul listino generale, per tutti (SER, 04/11) */
   var nuova = {uid:uidNuovo(), nome:"Nuovo prodotto", role:"", unita:"KG",
                consumoMq:0, kgConf:null, prezzoConf:null, on:true, desc:"", link:"", pdf:null};
   var quante = mettiInTutteLeSchede(nuova);
@@ -4582,7 +4577,6 @@ function copiaProdottoDa(uid){
   if(r) r.scrollIntoView({block:"center", behavior:"smooth"});
 }
 $("btnCopiaDa").addEventListener("click", function(){
-  if(cliListino){ aggiungiProdotto(); return; }       // da' il messaggio giusto
   var uid = $("copiaDa").value;
   if(!uid){ avvisa("Scegli prima il prodotto da copiare."); return; }
   copiaProdottoDa(uid);
@@ -7510,6 +7504,38 @@ function aggiungiGhiainoTerrazzo(){
   if(messi) salvaListino();
   return messi;
 }
+/* 04/11, una volta sola: nel Pavimento Terrazzo (SER) torna il GHIAINO con la cartella
+   colori dove manca (era stato tolto dal fondo assorbente), e vanno via la copia
+   "Livius-T" senza cartella colori e il QUARZO 0,1-0,3. Tutto il resto resta. */
+function sistemaGhiainoTerrazzo(){
+  if(load("pavpro.terrazzo.v5", null)) return 0;
+  var g = (listinoGenerale().gruppi || []).find(function(x){ return /terrazz/i.test(String(x.nome||"")); });
+  if(!g) return 0;
+  var gb = (LISTINO_BASE.gruppi || []).find(function(x){ return x.id === g.id; });
+  var fatti = 0;
+  (g.varianti || []).forEach(function(v){
+    v.voci = v.voci || [];
+    var prima = v.voci.length;
+    v.voci = v.voci.filter(function(c){
+      var nome = String(c.nome||"").trim().toUpperCase();
+      if(nome === "LIVIUS-T" && !(c.colori && c.colori.length)){ attDel(c.uid); return false; }
+      if(/^QUARZO 0,1-0,3/.test(nome)){ attDel(c.uid); return false; }
+      return true;
+    });
+    fatti += prima - v.voci.length;
+    if(v.voci.some(function(c){ return /^ghiaino$/i.test(String(c.nome||"").trim()) && c.colori && c.colori.length; })) return;
+    var vb = gb && (gb.varianti || []).find(function(x){ return x.id === v.id; });
+    var mod = vb && (vb.voci || []).find(function(c){ return /^ghiaino$/i.test(String(c.nome||"").trim()) && c.colori && c.colori.length; });
+    if(!mod) return;
+    var nuovo = clone(mod);
+    var k = v.voci.findIndex(function(c){ return /^livius-t$/i.test(String(c.nome||"").trim()); });
+    if(k >= 0) v.voci.splice(k + 1, 0, nuovo); else v.voci.push(nuovo);
+    fatti++;
+  });
+  save("pavpro.terrazzo.v5", {quando:new Date().toISOString(), gruppo:g.id, fatti:fatti});
+  if(fatti) salvaListino();
+  return fatti;
+}
 /* E, una volta sola, nel Pavimento Terrazzo entrano UNI-PRIMER 280 NEW,
    PRIMER A300, QUARZO 0,1-0,3 (legato al ghiaino del Terrazzo) e CERA MT,
    presi come sono negli altri sistemi. Chi c'e' gia' non si duplica. */
@@ -7519,7 +7545,7 @@ function aggiungiProdottiTerrazzo(){
   if(!g) return 0;
   var modelli = {};
   (LISTINO_BASE.gruppi || []).forEach(function(gb){ (gb.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){ modelli[c.uid] = c; }); }); });
-  var piano = [ {uid:"sr1a", dove:"inizio"}, {uid:"bs1b", dove:"inizio"}, {uid:"sl1q", dove:"dopo-ghiaino"}, {uid:"mt1i", dove:"fine"} ];
+  var piano = [ {uid:"sr1a", dove:"inizio"}, {uid:"bs1b", dove:"inizio"}, {uid:"mt1i", dove:"fine"} ];   // 04/11: niente piu' QUARZO nel Terrazzo
   var messi = 0;
   (g.varianti || []).forEach(function(v){
     v.voci = v.voci || [];
@@ -7650,8 +7676,9 @@ if(!CLIENTE){
     var tzVia = togliGhiainoTerrazzo();
     var tz = aggiungiGhiainoTerrazzo();
     var tz4 = aggiungiProdottiTerrazzo();
+    var tz5 = sistemaGhiainoTerrazzo();
     var ros = rimettiRosoni();
-    if(tz || tz4 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
+    if(tz || tz4 || tz5 || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
     tz = tz || tz4;
     disegnaSpazio();
     disegna();                 // le foto dei sistemi stanno nell'archivio: ora ci sono
