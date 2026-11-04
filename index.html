@@ -1673,6 +1673,12 @@ function migraFondoUmido(m){
       return nomi.indexOf(String(nv.voce.nome||"").trim().toUpperCase()) < 0;
     });
   }
+  /* 04/11: lo STAINCOLOR del Cemento stampato (cs1g, con le modifiche di SER: litri, consumo, prezzo,
+     colori) va copiato pari pari sul Cemento stampato basso spessore (bs1j e bsN1j), una volta sola */
+  if(m.voci && m.voci.cs1g && !load("pavpro.migra.staincolor.v1", null)){
+    m.voci.bs1j = clone(m.voci.cs1g); m.voci.bsN1j = clone(m.voci.cs1g);
+    save("pavpro.migra.staincolor.v1", {quando:new Date().toISOString()});
+  }
   /* 04/11: via i caratteri di controllo dai testi salvati (incollati da PDF) */
   (function pulisciRicorsivo(o, prof){
     if(!o || typeof o !== "object" || prof > 8) return;
