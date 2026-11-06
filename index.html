@@ -2080,6 +2080,7 @@ function salvaVociCliente(){
 }
 function apriListinoDi(id){
   if((id||null) === cliListino) return;
+  setTimeout(function(){ if(typeof disegnaPrezziDaAllineare === "function") disegnaPrezziDaAllineare(); }, 0);
   if(!cliListino) LISTINO_GEN = listino;          // da qui in poi "listino" e la copia del cliente
   var c = id ? clienti.find(function(x){ return x.id === id; }) : null;
   if(c){
@@ -2279,6 +2280,78 @@ function allineaDescrizione(c, prima){
   return quanti;
 }
 
+/* Lo stesso prodotto sta in piu' sistemi e varianti come copie separate: quando SER cambia il
+   prezzo a confezione di una copia, le altre con lo stesso nome e lo stesso formato prendono lo
+   stesso prezzo (SER, 06/11: "la stampa del listino deve venire uguale ai prezzi inseriti").
+   Si puo' annullare col tasto nel messaggio. */
+var ALLINEA_ULTIMO = null;
+function chiaveOmonimo(c){ return pulisciTesto(String(c.nome||"")).replace(/\s+/g, " ").trim().toUpperCase() + "|" + (Number(c.kgConf) > 0 ? Number(c.kgConf) : ""); }
+function copieOmonime(voce, L){
+  var k = chiaveOmonimo(voce), out = [];
+  (L || listino).gruppi.forEach(function(g){ (g.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){ if(c !== voce && c.uid !== voce.uid && chiaveOmonimo(c) === k) out.push(c); }); }); });
+  return out;
+}
+function allineaPrezziOmonimi(voce){
+  if(!voce || !String(voce.nome||"").trim()) return 0;
+  var nuovo = voce.prezzoConf, prima = [], n = 0;
+  copieOmonime(voce).forEach(function(c){
+    if((c.prezzoConf === null || c.prezzoConf === undefined ? null : Number(c.prezzoConf)) === (nuovo === null || nuovo === undefined ? null : Number(nuovo))) return;
+    prima.push({uid:c.uid, c:c, prezzo:c.prezzoConf}); c.prezzoConf = nuovo; n++;
+  });
+  if(!n) return 0;
+  ALLINEA_ULTIMO = {nome:voce.nome, prima:prima};
+  var m = $("statoMod") || $("copyMsg");
+  if(m){
+    m.className = "msg ok";
+    m.innerHTML = "Prezzo di " + esc(voce.nome) + " messo anche su " + n + (n === 1 ? " altra copia" : " altre copie") + " dello stesso prodotto (stesso formato) negli altri sistemi. "
+      + '<button class="btn sec small" type="button" id="btnAllineaAnnulla">Annulla</button>';
+    var b = document.getElementById("btnAllineaAnnulla");
+    if(b) b.addEventListener("click", function(){
+      if(!ALLINEA_ULTIMO) return;
+      ALLINEA_ULTIMO.prima.forEach(function(x){ x.c.prezzoConf = x.prezzo; });
+      ALLINEA_ULTIMO = null; salvaListino(); disegna();
+      m.className = "msg"; m.textContent = "Annullato: le altre copie hanno di nuovo il prezzo di prima.";
+    });
+  }
+  return n;
+}
+/* i prodotti che oggi hanno prezzi diversi fra le copie: SER sceglie quale vale, con un tocco */
+function prezziDaAllineare(L){
+  var gruppi = {};
+  (L || listino).gruppi.forEach(function(g){ if(g.nascosto) return; (g.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){
+    if(c.nascosto || c.catalogo || !String(c.nome||"").trim()) return;
+    var k = chiaveOmonimo(c), pr = (c.prezzoConf === null || c.prezzoConf === undefined || c.prezzoConf === "") ? null : Number(c.prezzoConf);
+    var e = gruppi[k] = gruppi[k] || {nome:c.nome, kg:Number(c.kgConf) > 0 ? Number(c.kgConf) : null, prezzi:{}, voci:[]};
+    e.voci.push(c); var pk = pr === null ? "-" : String(pr);
+    e.prezzi[pk] = e.prezzi[pk] || {prezzo:pr, n:0, sistemi:[]}; e.prezzi[pk].n++; if(e.prezzi[pk].sistemi.indexOf(g.nome) < 0) e.prezzi[pk].sistemi.push(g.nome);
+  }); }); });
+  return Object.keys(gruppi).map(function(k){ return gruppi[k]; }).filter(function(e){ return Object.keys(e.prezzi).length > 1; })
+    .sort(function(a, b){ return String(a.nome).localeCompare(String(b.nome), "it"); });
+}
+function disegnaPrezziDaAllineare(){
+  var box = $("allineaBox"); if(!box || !S.gestione) return;
+  var lista = prezziDaAllineare();
+  var chi = clienteListino();
+  if(!lista.length){ box.innerHTML = '<p class="hint" style="margin:0">Nessuna differenza: ogni prodotto ha lo stesso prezzo in tutti i sistemi' + (chi ? " (listino di " + esc(chi.nome||"") + ")" : "") + '.</p>'; return; }
+  box.innerHTML = '<p class="hint" style="margin:0 0 6px">' + lista.length + (lista.length === 1 ? ' prodotto ha' : ' prodotti hanno') + ' prezzi diversi fra un sistema e l\u2019altro' + (chi ? ' nel listino di ' + esc(chi.nome||"") : '') + '. Tocca il prezzo giusto: va su tutte le copie.</p>'
+    + lista.map(function(e, i){
+      return '<div class="vbox" style="margin-top:6px"><div style="font-weight:600">' + esc(e.nome) + (e.kg !== null ? ' <span class="hint">' + NI(e.kg) + ' kg</span>' : '') + '</div><div class="btnrow" style="margin-top:4px">'
+        + Object.keys(e.prezzi).map(function(pk){ var q = e.prezzi[pk]; return '<button class="btn sec small" type="button" data-allinea="' + i + '" data-prezzo="' + esc(pk) + '" title="' + esc(q.sistemi.join(", ")) + '">' + (q.prezzo === null ? 'senza prezzo' : E(q.prezzo)) + ' <span class="hint">(' + q.n + ')</span></button>'; }).join("")
+        + '</div></div>';
+    }).join("");
+  box.__lista = lista;
+}
+(function(){
+  var box = document.getElementById("allineaBox"); if(!box) return;
+  box.addEventListener("click", function(ev){
+    var b = ev.target.closest("[data-allinea]"); if(!b || !box.__lista) return;
+    var e = box.__lista[Number(b.getAttribute("data-allinea"))], pk = b.getAttribute("data-prezzo"); if(!e) return;
+    var prezzo = pk === "-" ? null : Number(pk), n = 0;
+    e.voci.forEach(function(c){ var cur = (c.prezzoConf === null || c.prezzoConf === undefined || c.prezzoConf === "") ? null : Number(c.prezzoConf); if(cur !== prezzo){ c.prezzoConf = prezzo; n++; } });
+    salvaListino(); disegna(); disegnaPrezziDaAllineare();
+    var m = $("statoSalvataggio"); if(m){ m.className = "msg ok"; m.textContent = e.nome + ": " + (prezzo === null ? "prezzo tolto" : E(prezzo)) + " su " + n + (n === 1 ? " copia" : " copie") + ". Vale dalla prossima pubblicazione."; }
+  });
+})();
 function sincronizzaGemelli(){
   var g = gruppoCorrente();
   if(!g || (g.varianti||[]).length < 2) return;
@@ -4588,7 +4661,7 @@ $("righe").addEventListener("input", function(e){
     var voce = vocePerUid(ed.getAttribute("data-i"));
     if(!voce) return;
     if(campo==="nome" || campo==="role" || campo==="unita" || campo==="nota" || campo==="avviso") voce[campo] = pulisciTesto(ed.value);
-    else if(campo==="prezzoConf") voce.prezzoConf = numIt(ed.value);
+    else if(campo==="prezzoConf"){ voce.prezzoConf = numIt(ed.value); allineaPrezziOmonimi(voce); }
     else if(campo==="resa"){
       var resa = numIt(ed.value);
       if(resa>0) voce.consumoMq = Math.round((Number(voce.kgConf)/resa)*10000)/10000;
@@ -5503,7 +5576,7 @@ function righeListinoPdf(){
     var k = [nome.toUpperCase(), dett.toUpperCase(), kg === null ? "" : kg, prezzo === null ? "" : prezzo].join("|");
     if(!righe[k]) righe[k] = {nome:nome, dett:dett, kg:kg, prezzo:prezzo, sistemi:[]};
     if(righe[k].sistemi.indexOf(sistema) < 0) righe[k].sistemi.push(sistema);
-    var pn = nome.toUpperCase() + "|" + dett.toUpperCase(); perNome[pn] = perNome[pn] || {}; perNome[pn][k] = 1;
+    var pn = nome.toUpperCase() + "|" + dett.toUpperCase() + "|" + (kg === null ? "" : kg); perNome[pn] = perNome[pn] || {}; perNome[pn][k] = 1;   // stessa confezione: conta solo il prezzo
   }
   function pz(v){ return (v===null||v===undefined||v==="") ? null : Number(v); }
   (listino.gruppi||[]).forEach(function(g){
@@ -5550,7 +5623,7 @@ function righeListinoPdf(){
     });
   });
   var out = Object.keys(righe).map(function(k){
-    var r = righe[k], gruppo = perNome[r.nome.toUpperCase() + "|" + r.dett.toUpperCase()], chiavi = Object.keys(gruppo);
+    var r = righe[k], gruppo = perNome[r.nome.toUpperCase() + "|" + r.dett.toUpperCase() + "|" + (r.kg === null ? "" : r.kg)], chiavi = Object.keys(gruppo);
     var tutti = []; chiavi.forEach(function(k2){ righe[k2].sistemi.forEach(function(sName){ if(tutti.indexOf(sName) < 0) tutti.push(sName); }); });
     r.ambiguo = chiavi.length > 1 && r.sistemi.length < tutti.length;   // stesso nome e confezione ma prezzo diverso: si dice in quali sistemi
     return r;
@@ -6284,7 +6357,8 @@ function mostraVista(v){
   $("tabCom").setAttribute("aria-selected", String(v==="com"));
 }
 $("tabPrev").addEventListener("click", function(){ mostraVista("prev"); disegna(); });
-$("tabGest").addEventListener("click", function(){ mostraVista("gest"); disegnaSpazio(); mostraStatoSalvataggio(); });
+$("tabGest").addEventListener("click", function(){ mostraVista("gest"); disegnaSpazio(); mostraStatoSalvataggio(); disegnaPrezziDaAllineare(); });
+(function(){ var b = document.getElementById("btnAllineaAggiorna"); if(b) b.addEventListener("click", disegnaPrezziDaAllineare); })();
 
 function mostraStatoSalvataggio(){
   var el = $("statoSalvataggio");
