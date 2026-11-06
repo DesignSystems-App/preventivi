@@ -7909,9 +7909,18 @@ function assistenteGestione(){
           var q = new Date(d.quando);
           return '<div class="vbox" style="margin-top:8px"><div class="hint">' + esc(q.toLocaleDateString("it-IT") + " " + q.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})) + ' · ' + esc(d.gestione ? "prova dalla gestione" : (d.nome || "cliente") + (d.id ? " (" + d.id + ")" : "")) + ' · ' + esc(d.lingua || "") + '</div>'
             + '<div style="font-weight:600;margin:4px 0" dir="auto">' + esc(d.domanda) + '</div><div dir="auto" style="white-space:pre-wrap;font-size:13.5px">' + esc(d.risposta) + '</div>'
-            + ((d.prodotti||[]).length ? '<div class="hint" style="margin-top:4px">Prodotti: ' + esc(d.prodotti.join(", ")) + '</div>' : '') + '</div>';
+            + ((d.prodotti||[]).length ? '<div class="hint" style="margin-top:4px">Prodotti: ' + esc(d.prodotti.join(", ")) + '</div>' : '')
+            + '<div class="btnrow" style="margin-top:6px"><button class="btn sec small" type="button" data-correggi="' + esc(d.domanda.slice(0, 200)) + '">Correggi questa risposta</button></div></div>';
         }).join("");
       });
+    });
+    /* "Correggi": prepara una riga nelle indicazioni partendo dalla domanda, SER scrive la risposta giusta e salva */
+    $("assistenteDomande").addEventListener("click", function(e){
+      var t = e.target.closest("[data-correggi]"); if(!t) return;
+      var ta = $("assistenteIndicazioni"), riga = "Se chiedono: \u00ab" + t.getAttribute("data-correggi") + "\u00bb \u2192 rispondi: ";
+      ta.value = (ta.value.trim() ? ta.value.trim() + "\n" : "") + riga;
+      ta.scrollIntoView({block:"center", behavior:"smooth"}); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      m.className = "msg"; m.textContent = "Scrivi dopo \u00abrispondi:\u00bb la risposta giusta (prodotti, quando usarli), poi premi \u00abSalva le indicazioni\u00bb: vale da subito per tutte le domande simili.";
     });
     $("assistenteCard").addEventListener("toggle", function(){ if($("assistenteCard").open) assistenteGestione(); });
   }
