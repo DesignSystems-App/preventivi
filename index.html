@@ -4802,8 +4802,17 @@ function destinatariDi(cli){
   var wa = (d.wa||[]).map(numeroWaCliente).filter(Boolean), mail = (d.mail||[]).map(function(x){ return String(x||"").trim(); }).filter(Boolean);
   return (wa.length || mail.length) ? {wa:wa, mail:mail} : null;
 }
-function testoLink(cli, url){
-  return "Scarica App Design Systems\n" + url;
+function testoLink(cli, url, via){
+  var az = (typeof AZIENDA !== "undefined" && AZIENDA) || {}, nomeAz = az.nome || "Design Systems Srl";
+  var chi = String((cli && cli.nome) || "").trim();
+  return "Ciao" + (chi ? " " + chi : "") + ", ecco la tua app Design Systems per preventivi e ordini, con il tuo listino personale:\n"
+    + url + "\n\n"
+    + "Aprila dal tuo telefono. Il link \u00e8 personale: vale solo per te e per questo telefono, non inoltrarlo.\n\n"
+    + "Per averla come app sulla schermata Home:\n"
+    + "\u2022 iPhone: tocca il link; se si apre dentro WhatsApp, tocca in basso a destra l\u2019icona di Safari (la bussola) per aprirlo in Safari. In Safari tocca Condividi (il quadrato con la freccia in su), poi \u201cAggiungi alla schermata Home\u201d e Aggiungi.\n"
+    + "\u2022 Android: tocca il link, si apre in Chrome; tocca i tre puntini in alto a destra, poi \u201cAggiungi a schermata Home\u201d (o \u201cInstalla app\u201d) e Aggiungi.\n\n"
+    + "Da l\u00ec in poi la trovi fra le tue app, sempre aggiornata con i tuoi prezzi. Per qualsiasi cosa " + (via === "mail" ? "rispondi a questa email" : "scrivici qui su WhatsApp") + ".\n"
+    + nomeAz;
 }
 /* i pezzi del link lungo (#c=&n=&i=&e=&t=&p=) come oggetto, per registrarli sul servizio */
 function datiLinkDa(url){
@@ -4854,7 +4863,7 @@ function mandaLink2(cli, m, modo, url, finestra){
   if(!cli.code){ m.className="msg err"; m.textContent="Questo cliente non ha un codice: salvalo di nuovo."; return; }
   if(modo === "mail"){
     var dest = String(cli.mail || "").trim();
-    window.location.href = "mailto:" + encodeURIComponent(dest) + "?subject=" + encodeURIComponent("La tua app Preventivi Pavimenti") + "&body=" + encodeURIComponent(testoLink(cli, url));
+    window.location.href = "mailto:" + encodeURIComponent(dest) + "?subject=" + encodeURIComponent("La tua app Preventivi Pavimenti") + "&body=" + encodeURIComponent(testoLink(cli, url, "mail"));
     m.className="msg ok"; m.textContent = "Email aperta" + (dest ? " per " + dest : " (sulla sua scheda non c\u2019\u00e8 l\u2019email: scrivi tu il destinatario)") + " col link personale di " + (cli.nome||"questo cliente") + ": premi Invia. Dal telefono il link si apre con un tocco, senza file da scaricare.";
     return;
   }
