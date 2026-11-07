@@ -1527,6 +1527,7 @@ if(CLIENTE && DATI && DATI.cliente && DATI.cliente.code){
 }
 
 var sel = load(K.sel, null) || {};
+var RIPRENDI_ORDINE = !!load("pavpro.ordmod.v1", null);
 var S = {
   gruppo: sel.gruppo || listino.gruppi[0].id,
   variante: sel.variante || listino.gruppi[0].varianti[0].id,
@@ -1545,15 +1546,18 @@ var S = {
   colq:   (sel.colq   && typeof sel.colq==="object")   ? sel.colq   : {},  // uid -> {colore: confezioni scritte a mano}
   stencil: (sel.stencil && typeof sel.stencil==="object") ? sel.stencil : {}, // uid -> {idModello: quantita}
   granulo: (sel.granulo && typeof sel.granulo==="object") ? sel.granulo : {},  // uid -> granulometria scelta
-  conf: (sel.conf && typeof sel.conf==="object") ? sel.conf : {},    // uid -> confezione scelta
+  conf: (RIPRENDI_ORDINE && sel.conf && typeof sel.conf==="object") ? sel.conf : {},    // uid -> confezione scelta
   fin: (sel.fin && typeof sel.fin==="object") ? sel.fin : {},        // uid -> finitura scelta
   colgr: (sel.colgr && typeof sel.colgr==="object") ? sel.colgr : {},  // uid -> {colore: granulometria}
   colpct: (sel.colpct && typeof sel.colpct==="object") ? sel.colpct : {},  // uid -> {colore: % nell'impasto}
-  cons: (sel.cons && typeof sel.cons==="object") ? sel.cons : {},    // uid -> consumo scelto
+  cons: (RIPRENDI_ORDINE && sel.cons && typeof sel.cons==="object") ? sel.cons : {},    // uid -> consumo scelto
   spessore: (sel.spessore && typeof sel.spessore==="object") ? sel.spessore : {},  // sistema -> spessore scelto (cm)
   vista: (sel.vista === "cliente" || sel.vista === "niente") ? sel.vista : "tutto",   // cosa si vede dei prezzi
   ricarico: (typeof sel.ricarico === "number" && sel.ricarico >= 0) ? sel.ricarico : 20,   // % sul totale per il cliente dell'applicatore
-  incluso: (sel.incluso && typeof sel.incluso==="object") ? sel.incluso : {},  // uid -> spunta "mi serve"
+  /* SER 07/11 sera: spunte, consumi e confezioni dei sottofondi tornano SEMPRE come nel listino a ogni apertura
+     (il cliente puo' cambiarli mentre lavora, ma alla riapertura valgono quelli di Design Systems);
+     solo quando si riapre un ordine per modificarlo tornano le scelte di quell'ordine */
+  incluso: (RIPRENDI_ORDINE && sel.incluso && typeof sel.incluso==="object") ? sel.incluso : {},  // uid -> spunta "mi serve"
   rif: sel.rif || "", wa: sel.wa || "", mail: sel.mail || "", note: sel.note || "",
   privacy: (sel.privacy && sel.privacy.quando) ? sel.privacy : null,   // {quando} consenso privacy
   modo: "ordine",   // l'app fa ordini, non preventivi
