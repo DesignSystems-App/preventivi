@@ -2284,36 +2284,80 @@ function allineaDescrizione(c, prima){
    prezzo a confezione di una copia, le altre con lo stesso nome e lo stesso formato prendono lo
    stesso prezzo (SER, 06/11: "la stampa del listino deve venire uguale ai prezzi inseriti").
    Si puo' annullare col tasto nel messaggio. */
-var ALLINEA_ULTIMO = null;
+/* SER, 07/11: «quando cambio qualcosa in un prodotto che si usa anche in altri sistemi o sottofondi,
+   la modifica deve avvenire in automatico nel prodotto che si chiama esattamente in quel modo».
+   Vanno su tutte le copie con lo stesso nome (maiuscole e spazi doppi non contano): nome, unita',
+   formato, confezioni, finiture, colori, prezzi del catalogo, scheda tecnica e link; il prezzo va
+   sulle copie con lo stesso formato. Descrizione breve, nota e avviso vanno sulle copie che avevano
+   lo stesso testo (o nessuno): una copia con un testo suo, scritto apposta per quel sistema, resta.
+   Restano di ogni copia: consumi, spunta "incluso", "nascondi", prodotti legati, granulometrie.
+   Il messaggio ha il tasto Annulla, che riporta le altre copie com'erano prima. */
+var OMO_ULTIMO = null;
+var NOMI_CAMPO_OMO = {nome:"il nome", role:"la descrizione breve", unita:"l’unità", nota:"la nota", avviso:"l’avviso", link:"il link",
+  kgConf:"il formato", prezzoConf:"il prezzo", confs:"le confezioni", finiture:"le finiture", colori:"i colori", catalogo:"i prezzi del catalogo"};
+function chiaveNome(n){ return pulisciTesto(String(n || "")).replace(/\s+/g, " ").trim().toUpperCase(); }
+function nomeSegnaposto(k){ return /^NUOVO PRODOTTO( LEGATO)?$/.test(k); }   // i prodotti appena creati non sono "lo stesso prodotto"
+function copieStessoNome(voce, nome){
+  var k = chiaveNome(nome === undefined ? voce.nome : nome), out = [];
+  if(!k || nomeSegnaposto(k)) return out;
+  scorriVoci(listino, function(c){ if(c !== voce && c.uid !== voce.uid && chiaveNome(c.nome) === k) out.push(c); });
+  return out;
+}
+/* opz.soloUguali: il testo di prima (cambiano solo le copie che lo avevano, o vuote);
+   opz.filtro: quali copie; opz.nome: il nome con cui cercarle (per il cambio di nome) */
+function suOmonimi(voce, campo, opz){
+  opz = opz || {};
+  if(!voce || CLIENTE) return 0;
+  var copie = copieStessoNome(voce, opz.nome);
+  if(opz.filtro) copie = copie.filter(opz.filtro);
+  var chiave = voce.uid + "|" + campo;
+  if(!OMO_ULTIMO || OMO_ULTIMO.chiave !== chiave) OMO_ULTIMO = {chiave:chiave, nome:voce.nome, campo:campo, prima:{}};
+  var nuovo = voce[campo], n = 0;
+  copie.forEach(function(c){
+    var val = c[campo];
+    if(opz.soloUguali !== undefined){
+      var sv = String(val == null ? "" : val).trim(), sp = String(opz.soloUguali == null ? "" : opz.soloUguali).trim();
+      if(sv !== "" && sv !== sp) return;
+    }
+    if(JSON.stringify(val) === JSON.stringify(nuovo)) return;
+    if(!(c.uid in OMO_ULTIMO.prima)) OMO_ULTIMO.prima[c.uid] = (val === undefined) ? {via:true} : {v:clone(val)};
+    if(nuovo === undefined) delete c[campo]; else c[campo] = clone(nuovo);
+    n++;
+  });
+  OMO_ULTIMO.nome = voce.nome;
+  var tot = Object.keys(OMO_ULTIMO.prima).length;
+  if(tot) avvisoOmonimi(tot);
+  return n;
+}
+function avvisoOmonimi(tot){
+  var x = OMO_ULTIMO, m = $("statoMod") || $("copyMsg"); if(!m || !x) return;
+  m.className = "msg ok";
+  m.innerHTML = esc(x.nome) + ": stessa modifica (" + (NOMI_CAMPO_OMO[x.campo] || "prodotto") + ") fatta anche su " + tot + (tot === 1 ? " altra copia" : " altre copie") + " dello stesso prodotto negli altri sistemi e sottofondi"
+    + (x.campo === "prezzoConf" ? " (stesso formato)" : "") + ". "
+    + '<button class="btn sec small" type="button" id="btnAllineaAnnulla">Annulla</button>';
+  var b = document.getElementById("btnAllineaAnnulla");
+  if(b) b.addEventListener("click", function(){
+    var u = OMO_ULTIMO; if(!u) return;
+    scorriVoci(listino, function(c){
+      var p = u.prima[c.uid]; if(!p) return;
+      if(p.via) delete c[u.campo]; else c[u.campo] = clone(p.v);
+    });
+    OMO_ULTIMO = null; salvaListino(); disegna();
+    m.className = "msg"; m.textContent = "Annullato: le altre copie sono tornate com’erano.";
+  });
+}
+var ALLINEA_ULTIMO = null;   // (vecchio nome, resta per compatibilita')
 function chiaveOmonimo(c){ return pulisciTesto(String(c.nome||"")).replace(/\s+/g, " ").trim().toUpperCase() + "|" + (Number(c.kgConf) > 0 ? Number(c.kgConf) : ""); }
 function copieOmonime(voce, L){
   var k = chiaveOmonimo(voce), out = [];
   (L || listino).gruppi.forEach(function(g){ (g.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){ if(c !== voce && c.uid !== voce.uid && chiaveOmonimo(c) === k) out.push(c); }); }); });
   return out;
 }
+/* il prezzo a confezione: sulle copie con lo stesso nome e lo stesso formato */
 function allineaPrezziOmonimi(voce){
   if(!voce || !String(voce.nome||"").trim()) return 0;
-  var nuovo = voce.prezzoConf, prima = [], n = 0;
-  copieOmonime(voce).forEach(function(c){
-    if((c.prezzoConf === null || c.prezzoConf === undefined ? null : Number(c.prezzoConf)) === (nuovo === null || nuovo === undefined ? null : Number(nuovo))) return;
-    prima.push({uid:c.uid, c:c, prezzo:c.prezzoConf}); c.prezzoConf = nuovo; n++;
-  });
-  if(!n) return 0;
-  ALLINEA_ULTIMO = {nome:voce.nome, prima:prima};
-  var m = $("statoMod") || $("copyMsg");
-  if(m){
-    m.className = "msg ok";
-    m.innerHTML = "Prezzo di " + esc(voce.nome) + " messo anche su " + n + (n === 1 ? " altra copia" : " altre copie") + " dello stesso prodotto (stesso formato) negli altri sistemi. "
-      + '<button class="btn sec small" type="button" id="btnAllineaAnnulla">Annulla</button>';
-    var b = document.getElementById("btnAllineaAnnulla");
-    if(b) b.addEventListener("click", function(){
-      if(!ALLINEA_ULTIMO) return;
-      ALLINEA_ULTIMO.prima.forEach(function(x){ x.c.prezzoConf = x.prezzo; });
-      ALLINEA_ULTIMO = null; salvaListino(); disegna();
-      m.className = "msg"; m.textContent = "Annullato: le altre copie hanno di nuovo il prezzo di prima.";
-    });
-  }
-  return n;
+  var k = chiaveOmonimo(voce);
+  return suOmonimi(voce, "prezzoConf", {filtro:function(c){ return chiaveOmonimo(c) === k; }});
 }
 /* i prodotti che oggi hanno prezzi diversi fra le copie: SER sceglie quale vale, con un tocco */
 function prezziDaAllineare(L){
@@ -4081,7 +4125,7 @@ $("righe").addEventListener("click", function(e){
       if(!va.confs) va.confs = [];
       if(!va.confs.length && Number(va.kgConf) > 0) va.confs.push({id:uidNuovo(), kg:Number(va.kgConf), prezzo:va.prezzoConf, on:true});
       va.confs.push({id:uidNuovo(), kg:null, prezzo:null, on:true});
-      salvaListino(); disegna();
+      suOmonimi(va, "confs"); salvaListino(); disegna();
     }
     return;
   }
@@ -4094,7 +4138,7 @@ $("righe").addEventListener("click", function(e){
       vs.confs = scala.map(function(kg){
         return {id:uidNuovo(), kg:kg, prezzo:(kg===suo ? vs.prezzoConf : null), on:(kg===suo)};
       });
-      salvaListino(); disegna();
+      suOmonimi(vs, "confs"); salvaListino(); disegna();
     }
     return;
   }
@@ -4103,7 +4147,7 @@ $("righe").addEventListener("click", function(e){
     if(vd && vd.confs){
       vd.confs = vd.confs.filter(function(z){ return z.id !== pd[1]; });
       if(S.conf[pd[0]] === pd[1]){ delete S.conf[pd[0]]; salvaSel(); }
-      salvaListino(); disegna();
+      suOmonimi(vd, "confs"); salvaListino(); disegna();
     }
     return;
   }
@@ -4204,7 +4248,7 @@ $("righe").addEventListener("click", function(e){
     if(vka){
       vka.colori = vka.colori || [];
       vka.colori.push({n:"NUOVO COLORE", c:"#c8c2b8", tinta:true});
-      salvaListino(); disegna();
+      suOmonimi(vka, "colori"); salvaListino(); disegna();
     }
     return;
   }
@@ -4218,14 +4262,14 @@ $("righe").addEventListener("click", function(e){
         if(S.colq[pkd[0]]) delete S.colq[pkd[0]][tolto.n];
         salvaSel();
       }
-      salvaListino(); disegna();
+      suOmonimi(vkd, "colori"); salvaListino(); disegna();
     }
     return;
   }
   if((t = e.target.closest("[data-ckfotodel]"))){
     var pkf = t.getAttribute("data-ckfotodel").split("|"), vkf = vocePerUid(pkf[0]);
     var kkf = vkf && (vkf.colori||[])[Number(pkf[1])];
-    if(kkf){ delete kkf.img; delete kkf.chip; kkf.tinta = true; salvaListino(); disegna(); }
+    if(kkf){ delete kkf.img; delete kkf.chip; kkf.tinta = true; suOmonimi(vkf, "colori"); salvaListino(); disegna(); }
     return;
   }
   if((t = e.target.closest("[data-fnsel]"))){
@@ -4238,7 +4282,7 @@ $("righe").addEventListener("click", function(e){
     if(vfa){
       vfa.finiture = vfa.finiture || [];
       vfa.finiture.push({id:uidNuovo(), n:"", on:true});
-      salvaListino(); disegna();
+      suOmonimi(vfa, "finiture"); salvaListino(); disegna();
     }
     return;
   }
@@ -4246,7 +4290,7 @@ $("righe").addEventListener("click", function(e){
     var vfs = vocePerUid(t.getAttribute("data-fnstd"));
     if(vfs){
       vfs.finiture = ["LUCIDA","SATINATA","OPACA"].map(function(n){ return {id:uidNuovo(), n:n, on:true}; });
-      salvaListino(); disegna();
+      suOmonimi(vfs, "finiture"); salvaListino(); disegna();
     }
     return;
   }
@@ -4255,7 +4299,7 @@ $("righe").addEventListener("click", function(e){
     if(vfd && vfd.finiture){
       vfd.finiture = vfd.finiture.filter(function(z){ return z.id !== pfd[1]; });
       if(S.fin[pfd[0]] === pfd[1]){ delete S.fin[pfd[0]]; salvaSel(); }
-      salvaListino(); disegna();
+      suOmonimi(vfd, "finiture"); salvaListino(); disegna();
     }
     return;
   }
@@ -4300,7 +4344,12 @@ $("righe").addEventListener("click", function(e){
   }
   if((t = e.target.closest("[data-pdfdel]"))){
     var u3 = t.getAttribute("data-pdfdel"), v3 = vocePerUid(u3);
-    if(v3){ v3.pdf = null; attDel(u3); salvaListino(); if(S.visore===u3) S.visore=null; disegna(); disegnaSpazio(); }
+    if(v3){
+      var tolteS = 0;
+      copieStessoNome(v3).forEach(function(c){ if(c.pdf || attGet(c.uid)){ c.pdf = null; attDel(c.uid); tolteS++; } });   // la scheda e' del prodotto: via da tutte le copie
+      v3.pdf = null; attDel(u3); salvaListino(); if(S.visore===u3) S.visore=null; disegna(); disegnaSpazio();
+      if(tolteS){ var mt = $("copyMsg"); mt.className = "msg ok"; mt.textContent = "Scheda tecnica di " + v3.nome + " tolta anche dalle altre " + tolteS + " copie dello stesso prodotto."; }
+    }
     return;
   }
   if((t = e.target.closest("[data-pz]"))){
@@ -4330,7 +4379,21 @@ $("righe").addEventListener("click", function(e){
   }
 });
 
+/* il nome che il prodotto aveva quando si e' entrati nel campo: all'uscita le copie con quel nome prendono il nuovo */
+$("righe").addEventListener("focusin", function(e){
+  var t = e.target.closest('[data-ed="nome"]'); if(!t) return;
+  var v = vocePerUid(t.getAttribute("data-i")); if(v) t.setAttribute("data-nome-prima", v.nome || "");
+});
 $("righe").addEventListener("change", function(e){
+  var edn = e.target.closest('[data-ed="nome"]');
+  if(edn){
+    var vn0 = vocePerUid(edn.getAttribute("data-i")), primaN = edn.getAttribute("data-nome-prima");
+    if(vn0 && primaN !== null && chiaveNome(primaN) !== chiaveNome(vn0.nome)){
+      if(suOmonimi(vn0, "nome", {nome:primaN})){ salvaListino(); disegna(); }
+    }
+    if(vn0) edn.setAttribute("data-nome-prima", vn0.nome || "");
+    return;
+  }
   var ds = e.target.closest("[data-descsolo]");
   if(ds){
     var cds = vocePerUid(ds.getAttribute("data-descsolo"));
@@ -4376,7 +4439,7 @@ $("righe").addEventListener("change", function(e){
     if(rfo){
       rfo.on = fno.checked;
       if(!fno.checked && S.fin[pfo[0]] === pfo[1]){ delete S.fin[pfo[0]]; salvaSel(); }
-      salvaListino(); disegna();
+      suOmonimi(vfo, "finiture"); salvaListino(); disegna();
     }
     return;
   }
@@ -4387,7 +4450,7 @@ $("righe").addEventListener("change", function(e){
     if(ro){
       ro.on = fo.checked;
       if(!fo.checked && S.conf[po[0]] === po[1]){ delete S.conf[po[0]]; salvaSel(); }
-      salvaListino(); disegna();
+      suOmonimi(vo, "confs"); salvaListino(); disegna();
     }
     return;
   }
@@ -4439,7 +4502,7 @@ $("righe").addEventListener("change", function(e){
     /* la foto si riduce alla misura della tessera: pesa poco e si vede nitida */
     ridimensiona(ff.files[0], 220, 0.82).then(function(dataUrl){
       kff.img = dataUrl; delete kff.chip; delete kff.tinta;
-      salvaListino(); disegna();
+      suOmonimi(vff, "colori"); salvaListino(); disegna();
       var m = $("copyMsg"); m.className = "msg ok"; m.textContent = "Foto messa sul colore " + kff.n + ".";
     }).catch(function(){ avvisa("Non sono riuscito a leggere l\u2019immagine."); });
   }
@@ -4478,7 +4541,7 @@ $("righe").addEventListener("input", function(e){
         if(S.colq[pn[0]] && (vecchioN in S.colq[pn[0]])){ S.colq[pn[0]][nuovoN] = S.colq[pn[0]][vecchioN]; delete S.colq[pn[0]][vecchioN]; }
         salvaSel();
       } else kn.nota = ckn.value;
-      salvaListino();
+      suOmonimi(vn, "colori"); salvaListino();
     }
     return;
   }
@@ -4491,7 +4554,7 @@ $("righe").addEventListener("input", function(e){
     if(kc){
       var val3 = numIt(ck.value);
       if(val3 === null) delete kc[qualeC]; else kc[qualeC] = val3;
-      salvaListino(); patchRiga(pc[0], "colore");
+      suOmonimi(vc3, "colori"); salvaListino(); patchRiga(pc[0], "colore");
     }
     return;
   }
@@ -4511,7 +4574,7 @@ $("righe").addEventListener("input", function(e){
   var lk = e.target.closest("[data-link]");
   if(lk){
     var cl = vocePerUid(lk.getAttribute("data-link"));
-    if(cl){ cl.link = lk.value.trim(); salvaListino(); }
+    if(cl){ cl.link = lk.value.trim(); suOmonimi(cl, "link"); salvaListino(); }
     return;
   }
 
@@ -4532,7 +4595,7 @@ $("righe").addEventListener("input", function(e){
     var vc = vocePerUid(p2[0]);
     if(vc && vc.catalogo){
       var mo = vc.catalogo.modelli.find(function(z){ return z.id===p2[1]; });
-      if(mo){ mo.prezzo = pm.value==="" ? null : Number(pm.value); salvaListino(); patchRiga(p2[0], "sten"); }
+      if(mo){ mo.prezzo = pm.value==="" ? null : Number(pm.value); suOmonimi(vc, "catalogo"); salvaListino(); patchRiga(p2[0], "sten"); }
     }
     return;
   }
@@ -4544,7 +4607,7 @@ $("righe").addEventListener("input", function(e){
     if(vc2 && vc2.catalogo && pa.value !== ""){
       var val = Number(pa.value);
       vc2.catalogo.modelli.forEach(function(z){ if(z.tipo===p3[1]) z.prezzo = val; });
-      salvaListino(); disegna();
+      suOmonimi(vc2, "catalogo"); salvaListino(); disegna();
     }
     return;
   }
@@ -4553,7 +4616,7 @@ $("righe").addEventListener("input", function(e){
   if(fnm){
     var pfn = fnm.getAttribute("data-fnnome").split("|"), vfn = vocePerUid(pfn[0]);
     var rfn = vfn && (vfn.finiture||[]).find(function(z){ return z.id === pfn[1]; });
-    if(rfn){ rfn.n = fnm.value; salvaListino(); }
+    if(rfn){ rfn.n = fnm.value; suOmonimi(vfn, "finiture"); salvaListino(); }
     return;
   }
   var cc = e.target.closest("[data-colori]");
@@ -4575,7 +4638,7 @@ $("righe").addEventListener("input", function(e){
         }
         return vecchio || null;                                 // riga col solo nome: tiene tutto quello che c'era
       }).filter(Boolean);
-      salvaListino();
+      suOmonimi(cv, "colori"); salvaListino();
     }
     return;
   }
@@ -4589,7 +4652,7 @@ $("righe").addEventListener("input", function(e){
     if(rfz){
       if(qualeFn === "comp") rfz.comp = pulisciTesto(ff.value);
       else { var nfz = numIt(ff.value); if(nfz === null || isNaN(nfz)) delete rfz[qualeFn]; else rfz[qualeFn] = nfz; }
-      salvaListino(); patchRiga(pfz[0], "variante");
+      suOmonimi(vfz, "finiture"); salvaListino(); patchRiga(pfz[0], "variante");
     }
     return;
   }
@@ -4599,7 +4662,7 @@ $("righe").addEventListener("input", function(e){
     var pz = cf.getAttribute(qualeF==="kg" ? "data-cfkg" : "data-cfpz").split("|");
     var vf = vocePerUid(pz[0]);
     var rf = vf && (vf.confs||[]).find(function(z){ return z.id === pz[1]; });
-    if(rf){ rf[qualeF] = numIt(cf.value); salvaListino(); patchRiga(pz[0], "variante"); }
+    if(rf){ rf[qualeF] = numIt(cf.value); suOmonimi(vf, "confs"); salvaListino(); patchRiga(pz[0], "variante"); }
     return;
   }
   var pcp = e.target.closest("[data-pcpct]");
@@ -4660,13 +4723,18 @@ $("righe").addEventListener("input", function(e){
     var campo = ed.getAttribute("data-ed");
     var voce = vocePerUid(ed.getAttribute("data-i"));
     if(!voce) return;
-    if(campo==="nome" || campo==="role" || campo==="unita" || campo==="nota" || campo==="avviso") voce[campo] = pulisciTesto(ed.value);
+    if(campo==="nome" || campo==="role" || campo==="unita" || campo==="nota" || campo==="avviso"){
+      var primaT = voce[campo];
+      voce[campo] = pulisciTesto(ed.value);
+      if(campo === "unita") suOmonimi(voce, "unita");                                  // il nome va sulle copie quando si esce dal campo
+      else if(campo !== "nome") suOmonimi(voce, campo, {soloUguali:primaT});
+    }
     else if(campo==="prezzoConf"){ voce.prezzoConf = numIt(ed.value); allineaPrezziOmonimi(voce); }
     else if(campo==="resa"){
       var resa = numIt(ed.value);
       if(resa>0) voce.consumoMq = Math.round((Number(voce.kgConf)/resa)*10000)/10000;
     }
-    else voce[campo] = numIt(ed.value) || 0;
+    else { voce[campo] = numIt(ed.value) || 0; if(campo === "kgConf") suOmonimi(voce, "kgConf"); }
     salvaListino();
     patchRiga(voce.uid, campo);
     return;
@@ -4718,8 +4786,10 @@ function caricaPdf(uid, file){
       return;
     }
     voce.pdf = {nome:file.name, peso:file.size};
+    var altre = 0;
+    copieStessoNome(voce).forEach(function(c){ if(attSet(c.uid, dataUrl)){ c.pdf = clone(voce.pdf); altre++; } });   // la scheda nuova va su tutte le copie, anche dove ce n'era una
     salvaListino();
-    var altre = propagaSchede();
+    altre += propagaSchede();
     S.aperta = uid; S.visore = uid;
     disegna(); disegnaSpazio();
     var m=$("copyMsg"); m.className="msg ok"; m.textContent="Scheda tecnica di "+voce.nome+" caricata." + (altre ? " Messa anche sugli altri " + altre + " prodotti che si chiamano cos\u00ec." : "");
