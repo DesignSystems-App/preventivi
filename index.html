@@ -821,7 +821,7 @@ var TEMPLATE_B64 = ""; /*__TEMPLATE__*/
 var ONLINE_B64 = ""; /*__ONLINE__*/      // l'index.html per il sito, pronto da pubblicare
 var GH_PRECOMPILATO = null; /*__GHPRE__*/   // {user, token} messi da Claude in una copia locale, una volta sola
 var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attivazioni, idem
-var APP_REV = "20261107190630";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261108065544";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -5522,7 +5522,7 @@ function mandaLink(cli, m, modo){
   /* WhatsApp si apre in una finestra nuova: Safari la blocca se arriva dopo un'attesa,
      quindi si apre subito vuota e si riempie quando il link corto e' pronto */
   var finestra = null;
-  if((modo === "wa" || modo === undefined || modo === false) && !linkPronto(cli) && linkCliente(cli)){ try{ finestra = window.open("about:blank", "_blank"); }catch(e){ finestra = null; } }
+  if((modo === "wa" || modo === undefined || modo === false) && !linkPronto(cli) && linkCliente(cli) && !suTelefono()){ try{ finestra = window.open("about:blank", "_blank"); }catch(e){ finestra = null; } }
   linkBreve(cli, function(url){ mandaLink2(cli, m, modo, url, finestra); });
 }
 function mandaLink2(cli, m, modo, url, finestra){
@@ -5552,7 +5552,8 @@ function mandaLink2(cli, m, modo, url, finestra){
     return;
   }
   var num = numeroWaCliente(cli.tel), waUrl = "https://wa.me/" + num + "?text=" + encodeURIComponent(testoLink(cli, url));
-  if(finestra){ try{ finestra.location.href = waUrl; }catch(e){ window.open(waUrl, "_blank", "noopener"); } }
+  if(suTelefono()){ try{ if(finestra) finestra.close(); }catch(e){} apriWhatsApp(num, testoLink(cli, url)); }
+  else if(finestra){ try{ finestra.location.href = waUrl; }catch(e){ window.open(waUrl, "_blank", "noopener"); } }
   else window.open(waUrl, "_blank", "noopener");
   var np = cli.voci ? Object.keys(cli.voci).length : 0;
   m.className="msg ok";
@@ -5587,7 +5588,7 @@ function mandaApp(cli, m, via){
   scarica(app.html, app.nome, "text/html;charset=utf-8");
   if(via === "wa"){
     var num = numeroWaCliente(cli && cli.tel);
-    window.open("https://wa.me/" + num + "?text=" + encodeURIComponent(testo), "_blank", "noopener");
+    apriWhatsApp(num, testo);
     m.className="msg ok";
     m.textContent = "App di " + chi + " scaricata in Download (" + kb(app.peso) + ") e WhatsApp aperto"
       + (num ? " sul suo numero" : " (scegli tu il contatto: sulla sua scheda non c\u2019\u00e8 il numero)")
@@ -6597,7 +6598,7 @@ $("btnScrivici").addEventListener("click", function(){
   var t = $("scriviciTesto").value, m = $("scriviciMsg"), num = numeroWa(AZIENDA.wa);
   if(!String(t).trim()){ m.className = "msg err"; m.textContent = T("Scrivi prima il messaggio."); $("scriviciTesto").focus(); return; }
   if(!num) return;
-  window.open("https://wa.me/" + num + "?text=" + encodeURIComponent(testoScrivici(t)), "_blank", "noopener");
+  apriWhatsApp(num, testoScrivici(t));
   m.className = "msg ok"; m.textContent = T("Si è aperto WhatsApp: premi Invia per mandarci il messaggio.");
 });
 disegnaScrivici();
@@ -6734,6 +6735,21 @@ function recapitiOrdini(){
 }
 function contattiRiservati(){ return !S.gestione && recapitiOrdini().riservati; }
 var ULTIMO_BREVE = "";
+/* SER 08/11: sul telefono WhatsApp si apre DIRETTAMENTE (whatsapp://), senza la pagina wa.me in una finestra nuova:
+   cosi' dopo aver premuto Invia in WhatsApp non resta una pagina bianca da chiudere con la X.
+   Sul computer resta wa.me in una scheda nuova (WhatsApp Web / app desktop). */
+function suTelefono(){ var ua = navigator.userAgent || ""; return /iPhone|iPad|iPod|Android/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); }
+function linkWhatsApp(num, testo){
+  num = String(num || "").replace(/[^0-9]/g, "");
+  return suTelefono() ? "whatsapp://send?" + (num ? "phone=" + num + "&" : "") + "text=" + encodeURIComponent(testo)
+                      : "https://wa.me/" + num + "?text=" + encodeURIComponent(testo);
+}
+function apriWhatsApp(num, testo){
+  var u = linkWhatsApp(num, testo);
+  if(suTelefono()) window.location.href = u;        // si passa all'app WhatsApp; la pagina dell'app resta com'era
+  else window.open(u, "_blank", "noopener");
+  return u;
+}
 function urlCanale(via, testo, quale){
   var rc = recapitiOrdini();
   if(via === "wa") return "https://wa.me/" + (rc.wa[quale || 0] || rc.wa[0] || "") + "?text=" + encodeURIComponent(testo);
@@ -6741,7 +6757,7 @@ function urlCanale(via, testo, quale){
   return a + "&body=" + encodeURIComponent(testo);
 }
 function apriCanale(via, testo, quale){
-  if(via === "wa"){ ULTIMO_BREVE = testo; window.open(urlCanale("wa", testo, quale), "_blank", "noopener"); }
+  if(via === "wa"){ ULTIMO_BREVE = testo; var rc = recapitiOrdini(); apriWhatsApp(rc.wa[quale || 0] || rc.wa[0] || "", testo); }
   else window.location.href = urlCanale("mail", testo);
 }
 /* con piu' numeri WhatsApp: dopo il primo invio, i tasti per mandare la copia agli altri */
@@ -6812,7 +6828,7 @@ function aggiornaInvii(r){
     $("btnWa").setAttribute("data-pdf", "wa"); $("btnMail").setAttribute("data-pdf", "mail");
   } else {
     $("btnWa").removeAttribute("data-pdf"); $("btnMail").removeAttribute("data-pdf");
-    $("btnWa").href = "https://wa.me/" + numDest + "?text=" + encodeURIComponent(testo);
+    $("btnWa").href = linkWhatsApp(numDest, testo);
     $("btnMail").href = "mailto:" + encodeURIComponent(mailDest)
       + "?subject=" + encodeURIComponent(oggetto) + "&body=" + encodeURIComponent(testo);
   }
@@ -8316,7 +8332,7 @@ function tastiInoltro(o){
 function inoltraOrdine(numero, n, bottone){
   var o = (ORDINI_NUOVI.concat(ORDINI_ULTIMI)).find(function(x){ return String(x.numero) === String(numero); });
   if(!o) return;
-  window.open("https://wa.me/" + n + "?text=" + encodeURIComponent(testoInoltro(o)), "_blank", "noopener");
+  apriWhatsApp(n, testoInoltro(o));
   var f = inoltriFatti(); f[String(numero)] = (f[String(numero)] || []).concat([n]); save("pavpro.ordini.inoltrati.v1", f);
   if(bottone){ bottone.className = "btn sec small"; bottone.textContent = "\u2713 inoltrato a +" + n; }
 }
@@ -8484,7 +8500,7 @@ function testoRifiuto(motivo){
       + '<span style="display:inline-block;margin:8px 0;font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:.12em">' + esc(codice) + '</span>';
     var row = box.querySelector(".btnrow"); row.hidden = false;
     var msgWa = T("Attivazione app Preventivi Pavimenti") + " \u2014 " + (LINK_CLI.nome || "") + " \u2014 " + T("codice") + " " + codice;
-    row.innerHTML = '<a class="btn small" id="btnMandaCodice" target="_blank" rel="noopener" href="https://wa.me/' + esc(numeroWa(AZIENDA.wa)) + '?text=' + encodeURIComponent(msgWa) + '">Manda il codice su WhatsApp</a>'
+    row.innerHTML = '<a class="btn small" id="btnMandaCodice"' + (suTelefono() ? '' : ' target="_blank" rel="noopener"') + ' href="' + esc(linkWhatsApp(numeroWa(AZIENDA.wa), msgWa)) + '">Manda il codice su WhatsApp</a>'
       + '<button class="btn sec small" type="button" id="btnRicontrolla">Ho mandato il codice</button>';
     m.className = "msg"; m.textContent = "In attesa dell\u2019approvazione di " + (AZIENDA.nome || "Design Systems") + "\u2026 (controllo da solo ogni 10 secondi)";
     document.getElementById("btnRicontrolla").addEventListener("click", function(){ finisci(tel, true); });
@@ -8641,7 +8657,7 @@ $("btnRichiesta").addEventListener("click", function(){
             + segna($("ricTel"), d.tel.length < 10 || d.tel.length > 15) + segna($("ricPrivacy").closest(".privacybox"), !$("ricPrivacy").checked);
   if(manca){ m.className = "msg err"; m.textContent = T("Mancano dei dati: completa i campi segnati in rosso (il numero WhatsApp col prefisso del paese)."); return; }
   var num = numeroWa(AZIENDA.wa);
-  if(num) window.open("https://wa.me/" + num + "?text=" + encodeURIComponent(testoRichiestaWa(d)), "_blank", "noopener");
+  if(num) apriWhatsApp(num, testoRichiestaWa(d));
   var u = urlAttivazioni();
   if(u){ try{ fetch(u + "/richiesta", {method:"POST", keepalive:true, headers:{"Content-Type":"text/plain;charset=UTF-8"}, body:JSON.stringify(d)})   /* text/plain: niente preflight, cosi' keepalive funziona anche mentre si apre WhatsApp */.catch(function(){}); }catch(e){} }
   d.quando = new Date().toISOString(); d.privacy = d.quando;
