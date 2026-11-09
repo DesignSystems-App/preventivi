@@ -828,7 +828,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109150343";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109154707";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -2251,7 +2251,39 @@ function salvaVociCliente(){
       + " Colori, confezioni e descrizioni vanno sul listino generale, per tutti.";
   }
 }
+/* SER 09/11: in gestione il listino aperto e lo sconto attivo sono sempre dello stesso cliente.
+   Prima si poteva avere il listino dei POSATORI con lo sconto di Fran.Cal. ancora attivo. */
+function legaScontoAlListino(id){
+  if(CLIENTE) return;
+  if(id){
+    var c = clienti.find(function(x){ return x.id === id; });
+    if(c && c.code && (!cliente || cliente.id !== c.id || cliente.code !== c.code)) attivaClienteSilenzioso(c);
+    else if(c && !c.code && cliente){ cliente = null; drop(K.cli); }
+    return;
+  }
+  /* listino generale: se lo sconto attivo e' di un cliente con prezzi suoi, quei prezzi qui non ci sono piu' */
+  if(cliente){
+    var ca = cliente.id ? clienti.find(function(x){ return x.id === cliente.id; }) : cliente_DaCodice(cliente.code);
+    if(ca && ca.voci && Object.keys(ca.voci).length){ cliente = null; drop(K.cli); }
+  }
+}
+function attivaClienteSilenzioso(c){
+  var r = leggiCodice(c.code); if(!r.ok) return false;
+  cliente = {code:c.code, id:c.id, base:r.base, ecc:r.ecc, eccP:r.eccP||[], scadenza:r.scadenza};
+  save(K.cli, {code:c.code, id:c.id});
+  return true;
+}
+/* il codice di un cliente cambia quando si cambiano i suoi sconti: lo sconto attivo segue il codice nuovo */
+function riallineaClienteAttivo(){
+  if(CLIENTE || !cliente) return false;
+  var c = cliente.id ? clienti.find(function(x){ return x.id === cliente.id; }) : null;
+  if(!c && cliente.code) c = clienti.find(function(x){ return pulisci(x.code || "") === pulisci(cliente.code); });
+  if(!c){ if(cliente.id){ cliente = null; drop(K.cli); return true; } return false; }
+  if(c.code && (c.code !== cliente.code || c.id !== cliente.id)){ attivaClienteSilenzioso(c); return true; }
+  return false;
+}
 function apriListinoDi(id){
+  legaScontoAlListino(id || null);
   if((id||null) === cliListino) return;
   setTimeout(function(){ if(typeof disegnaPrezziDaAllineare === "function") disegnaPrezziDaAllineare(); }, 0);
   if(!cliListino) LISTINO_GEN = listino;          // da qui in poi "listino" e la copia del cliente
@@ -4258,6 +4290,16 @@ function elencoSconti(cli){
     var adesso = null; scorriVoci(listinoGenerale(), function(c){ if(!adesso && (chiaveNome(c.nome) === chiaveNome(n) || (nf[c.uid] && chiaveNome(nf[c.uid]) === chiaveNome(n)))) adesso = c.nome; });
     if(!adesso && NOMI_VECCHI[chiaveNome(n)]) adesso = NOMI_VECCHI[chiaveNome(n)];
     var nome = String(adesso || n).trim(); if(visti[chiaveNome(nome)]) return; visti[chiaveNome(nome)] = 1;
+    /* SER 09/11: si elenca solo se cambia davvero qualcosa: un prodotto al 67% dentro un sistema gia' al 67% non si ripete */
+    var kn = chiaveNome(nome), diverso = false, trovato = false;
+    (listinoGenerale().gruppi || []).forEach(function(g){
+      var c0 = null; (g.varianti || []).forEach(function(v){ (v.voci || []).forEach(function(c){ if(!c0 && chiaveNome(c.nome) === kn) c0 = c; }); });
+      if(!c0) return; trovato = true;
+      var ig = LISTINO_BASE.gruppi.findIndex(function(x){ return x.id === g.id; }), sis = cli.base;
+      (cli.ecc || []).forEach(function(x){ if(x.idx === ig) sis = x.val; });
+      if(sis !== e.val) diverso = true;
+    });
+    if(trovato && !diverso) return;
     out.push(nome + " " + N(e.val) + "%");
   });
   return out;
@@ -7447,6 +7489,7 @@ function disegnaGenSconti(){
    da solo non basta.
    ============================================================ */
 var clienti = load(K.clienti, []);
+riallineaClienteAttivo();
 var cliInModifica = null;
 /* "Riusa per un altro": il nuovo cliente nasce con sconti, eccezioni,
    scadenza e prezzi di quello scelto; cambia solo l'intestazione. */
@@ -7627,6 +7670,7 @@ var LK_TIMER = null;
 function salvaClienti(){
   /* dopo un salvataggio, i link corti dei clienti cambiati si aggiornano da soli (poco dopo, una volta sola) */
   if(!CLIENTE){ clearTimeout(LK_TIMER); LK_TIMER = setTimeout(function(){ if(typeof registraLinkTutti === "function") registraLinkTutti(); }, 800); }
+  riallineaClienteAttivo();
   if(!save(K.clienti, clienti)){
     var m=$("cliMsg"); m.className="msg err";
     m.textContent="Non sono riuscito a salvare l'elenco clienti: memoria del browser piena o bloccata.";
@@ -7731,6 +7775,7 @@ $("elencoClienti").addEventListener("click", function(e){
   if((t = e.target.closest("[data-cliusa]"))){
     var cu = clienti.find(function(x){ return x.id === t.getAttribute("data-cliusa"); });
     if(cu){
+      if(S.gestione && cu.voci && Object.keys(cu.voci).length) apriListinoDi(cu.id);   // i suoi sconti con i suoi prezzi
       if(attivaCliente(cu)){
         mostraVista("prev");
         $("vPrev").scrollIntoView({block:"start", behavior:"smooth"});
