@@ -562,6 +562,7 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
       <p style="font-size:13.5px;line-height:1.5;margin:0 0 10px" id="modTesto"></p>
       <div class="btnrow"><button class="btn sec small" type="button" id="btnModAnnulla">Annulla la modifica</button></div>
     </div>
+    
     <!-- SER 07/11: chi apre l'app dal sito o dai social chiede l'attivazione -->
     <div class="card" id="cardRichiesta" hidden>
       <h2>Prezzi e ordini dopo l'attivazione</h2>
@@ -788,6 +789,7 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
       <button class="btn sec small" type="button" id="btnInstallaNo">Più tardi</button></div>
   </div>
   
+  
 
   <!-- Formato della copia di sicurezza (pavpro-dati, versione 2):
        { formato, versioneFormato, rev, quando,
@@ -828,7 +830,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109154707";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109201701";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1527,6 +1529,8 @@ if(CLIENTE && FONTE && FONTE.listino){
   }
 }
 normalizza(listino);
+/* i prezzi del listino generale come sono all'apertura: servono a proteggere i listini dei clienti */
+if(!CLIENTE) PREZZI_GEN = prezziCompleti(listino);
 
 var pw = load(K.pw, "pavimenti");
 var cliente = load(K.cli, null);
@@ -2184,6 +2188,54 @@ function vociDiverse(l, gen){
   });
   return out;
 }
+/* SER 09/11: un listino dedicato a un cliente e' BLOCCATO. Dentro ci sono TUTTI i suoi prezzi (non solo quelli
+   diversi dal generale): cosi' il listino generale, gli altri clienti e i collaboratori non glieli cambiano piu'.
+   Cambiano solo quando qualcuno li modifica a mano sul listino di quel cliente. */
+function prezziCompleti(l){
+  var out = {};
+  scorriVoci(l, function(c){
+    if(out[c.uid]) return;                       // gemelli: stesso prodotto in piu' sistemi, stessi prezzi
+    var d = {prezzoConf: prezzoPulito(c.prezzoConf)};
+    if((c.confs||[]).length){ d.confs = {}; c.confs.forEach(function(z){ if(z && z.id) d.confs[z.id] = prezzoPulito(z.prezzo); }); }
+    if((c.colori||[]).some(function(k){ return k && prezzoPulito(k.prezzo) !== null; })){ d.colori = {}; c.colori.forEach(function(k){ if(k && k.n !== undefined && k.prezzo !== undefined) d.colori[k.n] = prezzoPulito(k.prezzo); }); }
+    if((c.finiture||[]).length){ d.finiture = {}; c.finiture.forEach(function(z){ if(z && z.id) d.finiture[z.id] = prezzoPulito(z.prezzo); }); }
+    if(c.catalogo && (c.catalogo.modelli||[]).length){ d.catalogo = {}; c.catalogo.modelli.forEach(function(m){ if(m && m.id) d.catalogo[m.id] = prezzoPulito(m.prezzo); }); }
+    out[c.uid] = d;
+  });
+  return out;
+}
+function haListinoSuo(c){ return !!(c && c.voci && Object.keys(c.voci).length); }
+/* prima di salvare il listino generale: ogni prezzo che cambia nel generale e che un cliente con listino suo
+   non ha ancora fra i suoi, gli resta com'era (il vecchio prezzo diventa suo). Ritorna quanti clienti ha protetto. */
+var PREZZI_GEN;   // si riempie all'apertura, appena il listino e' pronto (piu' su)
+function proteggiListiniClienti(){
+  if(CLIENTE) return 0;
+  var nuovi = prezziCompleti(listinoGenerale());
+  if(!PREZZI_GEN){ PREZZI_GEN = nuovi; return 0; }
+  var vecchi = PREZZI_GEN, protetti = 0;
+  clienti.forEach(function(c){
+    if(!haListinoSuo(c)) return;
+    var cambiato = false;
+    for(var uid in vecchi){
+      var o = vecchi[uid], n = nuovi[uid]; if(!n) continue;
+      var cv = c.voci[uid] || {}, mio = false;
+      if(!("prezzoConf" in cv) && o.prezzoConf !== null && n.prezzoConf !== o.prezzoConf){ cv.prezzoConf = o.prezzoConf; mio = true; }
+      ["confs","colori","finiture","catalogo"].forEach(function(k){
+        if(!o[k]) return;
+        for(var id in o[k]){
+          if(o[k][id] === null || (n[k] && n[k][id] === o[k][id])) continue;
+          if(cv[k] && (id in cv[k])) continue;
+          cv[k] = cv[k] || {}; cv[k][id] = o[k][id]; mio = true;
+        }
+      });
+      if(mio){ c.voci[uid] = cv; cambiato = true; }
+    }
+    if(cambiato){ c.fisso = true; protetti++; }
+  });
+  PREZZI_GEN = nuovi;
+  if(protetti) salvaClienti();
+  return protetti;
+}
 function clienteListino(){
   if(!cliListino) return null;
   return clienti.find(function(c){ return c.id === cliListino; }) || null;
@@ -2239,15 +2291,14 @@ function riportaSulGenerale(){
 function salvaVociCliente(){
   var c = clienteListino();
   if(!c) return;
-  c.voci = vociDiverse(listino, LISTINO_GEN);
+  c.voci = prezziCompleti(listino);      // SER 09/11: tutti i prezzi, cosi' il listino generale non li cambia piu'
+  c.fisso = true;
   c.aggiornato = new Date().toISOString();
   if(salvaClienti()){
-    var n = Object.keys(c.voci).length;
     segnalaSalvataggio(JSON.stringify(c.voci).length);
     var el = $("cliListinoMsg");
     el.className = "msg err";
-    el.textContent = "Prezzi salvati solo per " + (c.nome||"questo cliente") + ": "
-      + (n ? n + " prodott" + (n>1?"i":"o") + " con prezzi suoi." : "nessun prezzo diverso dal listino generale.")
+    el.textContent = "Listino di " + (c.nome||"questo cliente") + " salvato e bloccato: i suoi prezzi cambiano solo se li modifichi qui, il listino generale non li tocca."
       + " Colori, confezioni e descrizioni vanno sul listino generale, per tutti.";
   }
 }
@@ -2306,14 +2357,14 @@ function disegnaBarraCli(){
   box.hidden = !S.gestione;
   if(!S.gestione) return;
   var el = $("selCliListino");
-  var firma = clienti.map(function(c){ return c.id + ":" + (c.nome||""); }).join("|");
+  var firma = clienti.map(function(c){ return c.id + ":" + (c.nome||"") + ":" + (c.fisso ? 1 : 0); }).join("|");
   if(el.dataset.firma !== firma){
     el.dataset.firma = firma;
     el.innerHTML = '<option value="">Listino generale \u2014 vale per tutti</option>'
       + clienti.map(function(c){
           var n = c.voci ? Object.keys(c.voci).length : 0;
           return '<option value="'+esc(c.id)+'">'+esc(c.nome||"(senza nome)")
-               + (n ? " \u2014 "+n+" prodott"+(n>1?"i":"o")+" suo"+(n>1?"i":"") : "")+'</option>';
+               + (c.fisso ? " \u2014 listino suo, bloccato" : n ? " \u2014 "+n+" prodott"+(n>1?"i":"o")+" suo"+(n>1?"i":"") : "")+'</option>';
         }).join("");
   }
   el.value = cliListino || "";
@@ -2337,7 +2388,8 @@ function disegnaBarraCli(){
     var q = c.voci ? Object.keys(c.voci).length : 0;
     m.className = "msg err";
     m.textContent = "Per " + (c.nome||"questo cliente") + " i prezzi che scrivi sono solo suoi; colori, confezioni, consumi e descrizioni vanno sul listino generale, per tutti. "
-      + (q ? q+" prodott"+(q>1?"i":"o")+" con un prezzo suo." : "Per ora nessun prezzo diverso dal generale.");
+      + (c.fisso ? "Il suo listino \u00e8 bloccato: i cambi del listino generale non lo toccano, i suoi prezzi cambiano solo se li modifichi qui."
+                 : q ? q+" prodott"+(q>1?"i":"o")+" con un prezzo suo." : "Per ora segue il listino generale: appena salvi un suo prezzo, il suo listino si blocca.");
   } else {
     m.className = "msg";
     m.textContent = clienti.length
@@ -2629,6 +2681,7 @@ function salvaListino(){
   }
   sincronizzaGemelli();
   sincronizzaCollegati();
+  proteggiListiniClienti();
   var m = calcolaModifiche();
   var testo = JSON.stringify(m);
   var ok = save(K.mod, m);
@@ -4560,7 +4613,7 @@ function disegnaPrivacy(){
   $("condizioniTesto").textContent = az.condizioni || "";
   $("privacyStato").textContent = ok ? ("Informativa letta il " + new Date(S.privacy.quando).toLocaleDateString("it-IT") + ".") : "";
   $("privacyChi").textContent = "Ordini riservati ad aziende, professionisti e collaboratori di " + (az.nome || "Design Systems Srl") + ".";
-  $("oblPrivacy").hidden = ok;
+  $("oblPrivacy").hidden = ok || ordGestAttivo();
 }
 $("noteOrd").addEventListener("input", function(e){ S.note = e.target.value; salvaSel(); disegnaRiepilogo(calcola()); });
 $("waNum").addEventListener("input", function(e){ S.wa = e.target.value; salvaSel(); aggiornaInvii(calcola()); });
@@ -5534,6 +5587,7 @@ function costruisciApp(cli){
                  avvisiUrl: load(K.avUrl, ""), baseUrl: load(K.base, ""), azienda: completaAzienda(load(K.azienda, null)),
                  sfrido:Number(S.scarto)||0, prodExtra:PRODOTTI_EXTRA.slice(), nomiFabbrica: nomiFabbricaCambiati(perClienti), quando:new Date().toISOString() };
     if(cli) dati.cliente = {nome:cli.nome||"", code:cli.code||"", tel:cli.tel||"", mail:cli.mail||""};
+    if(cli && haListinoSuo(cli)) dati.vociCliente = migraVociCliente(clone(cli.voci));   // restano anche se il listino si aggiorna dal sito
     dati.rev = firmaDati({listino:dati.listino, allegati:dati.allegati, sfrido:dati.sfrido});
     var json = JSON.stringify(dati).replace(/</g, "\\u003c");
     var html = modello.replace(MARCA_DATI, function(){ return "var DATI = " + json + ";"; });
@@ -5625,13 +5679,19 @@ function datiLinkDa(url){
 /* Il link corto: sul telefono del cliente arriva solo sito/#k=id, i dati stanno sul
    servizio. L'id resta lo stesso anche se SER cambia sconti o email: il link gia'
    mandato continua a valere. Senza servizio (o se non risponde) si usa il link lungo. */
-var LK_TENT = {}, LK_ATTESA = {};
+var LK_TENT = {}, LK_ATTESA = {}, SERV_VER = null;
 function linkBreve(cli, poi){
   var lungo = linkCliente(cli);
   if(!lungo){ poi(null); return; }
   if(cli.lk && cli.lkDi === lungo){ poi(cli.lk); return; }
   var a = (typeof attImpostazioni === "function") ? attImpostazioni() : {};
   if(!/^https?:\/\//i.test(a.url||"") || !a.chiave){ poi(lungo); return; }
+  /* SER 09/11: con il listino bloccato il link porta tutti i prezzi; il servizio fino alla versione 16 ne tiene
+     solo 20.000 caratteri: oltre, si usa il link lungo (porta tutto) finche' il servizio non e' alla 17 */
+  if((datiLinkDa(lungo).p || "").length > 19500 && !(SERV_VER >= 17)){
+    if(SERV_VER === null){ fetch(a.url.replace(/\/+$/,"") + "/").then(function(r){ return r.json(); }).then(function(j){ SERV_VER = Number(j && j.versione) || 0; }).catch(function(){ SERV_VER = 0; }).then(function(){ linkBreve(cli, poi); }); return; }
+    poi(lungo); return;
+  }
   if(LK_ATTESA[cli.id]){ LK_ATTESA[cli.id].push(poi); return; }            // richiesta gia' in corso
   if(LK_TENT[cli.id] && Date.now() - LK_TENT[cli.id] < 60000){ poi(lungo); return; }   // fallita da poco: niente martellate
   LK_TENT[cli.id] = Date.now(); LK_ATTESA[cli.id] = [poi];
@@ -5691,7 +5751,7 @@ function mandaLink2(cli, m, modo, url, finestra){
   var np = cli.voci ? Object.keys(cli.voci).length : 0;
   m.className="msg ok";
   m.textContent = "WhatsApp aperto" + (num ? " sul numero di " + (cli.nome||"questo cliente") : " (scegli tu il contatto: sulla sua scheda non c\u2019\u00e8 il numero)")
-    + " col link personale: sconto " + N(cli.base) + "%" + (np ? " e " + np + " prodott" + (np>1?"i":"o") + " a prezzo suo" : "")
+    + " col link personale: sconto " + N(cli.base) + "%" + (cli.fisso ? " e il suo listino bloccato" : np ? " e " + np + " prodott" + (np>1?"i":"o") + " a prezzo suo" : "")
     + ". Ricordati che il listino sul sito \u00e8 quello dell\u2019ultimo dati.json caricato.";
 }
 function mandaApp(cli, m, via){
@@ -6039,6 +6099,7 @@ function testoRiepilogo(){
     if(S.mail) L.push("  email: " + S.mail);
     if(S.wa)   L.push("  whatsapp: " + S.wa);
     if(cliente && cliente.code) L.push("  codice sconto: " + cliente.code);
+    if(infoOrdGest()) L.push("  ordine inserito dal gestionale da " + infoOrdGest().chi);
     if(S.privacy && S.privacy.quando) L.push("  informativa privacy letta il " + new Date(S.privacy.quando).toLocaleDateString("it-IT") + " alle " + new Date(S.privacy.quando).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) + (AZIENDA.condizioni ? ", condizioni di vendita accettate" : ""));
     L.push("");
   } else if(S.rif){
@@ -6503,6 +6564,8 @@ function telaOrdine(){
     var cardY = y;
     y += 18;
     font("700", 17, FD); y += 17; testo(ordine ? "Riepilogo dell\u2019ordine" : "Preventivo materiali", px, y);
+    var ogI = ordine ? infoOrdGest() : null;
+    if(ogI){ font("600", 12); y += 18; testo("Ordine inserito da " + ogI.chi + (ogI.chi.indexOf(AZIENDA.nome || "Design Systems") >= 0 ? "" : " (" + (AZIENDA.nome || "Design Systems Srl") + ")") + " per conto del cliente", px, y, {col:C.signal, it:true}); }
     y += 10;
     var mezza = (pw - 14) / 2;
     var h1 = campo("Cliente o cantiere", S.rif, px, mezza, y); campo("WhatsApp del cliente", S.wa, px + mezza + 14, mezza, y); y += h1 + 10;
@@ -6576,7 +6639,7 @@ function telaOrdine(){
     rett(px, y, pw, fh, "#fff", C.ok, 4);
     if(fcv && firmaFatta && !soloMisura){ var fw = Math.min(pw - 20, (fh - 20) * fcv.width / fcv.height), fhh = fw * fcv.height / fcv.width; g.drawImage(fcv, px + 10, y + (fh - fhh)/2, fw, fhh); }
     y += fh;
-    font("400", 11.5); y += 18; testo(testoFirma() || "Non firmato.", px, y, {col:C.muted});
+    font("400", 11.5); y += 18; testo(testoFirma() || (ogI ? "Non firmato dal cliente: ordine inserito da " + ogI.chi + "." : "Non firmato."), px, y, {col:C.muted, it:!!ogI && !testoFirma()});
     y += 18;
     /* il riquadro grande intorno a tutto */
     var fine = y + 6;
@@ -6660,7 +6723,8 @@ function ordSalvaLocale(meta, pdfB64){
 }
 function datiOrdine(r){
   var ordine = (S.modo === "ordine");
-  return { id: (LINK_CLI && LINK_CLI.id) || "", device: idDispositivo(), sostituisce: ORD_MODIFICA ? ORD_MODIFICA.numero : "",
+  var og = ordGestAttivo() ? ORD_GEST : null;
+  return { id: og ? og.cliId : ((LINK_CLI && LINK_CLI.id) || ""), device: idDispositivo(), sostituisce: og ? (og.sostituisce || "") : (ORD_MODIFICA ? ORD_MODIFICA.numero : ""),
            cliente: {nome:S.rif||"", tel:S.wa||"", mail:S.mail||""},
            sistema: r.g.nome + (r.g.varianti.length>1 ? " \u2014 " + r.v.nome : ""), mq: r.mq,
            imponibile: Math.round(r.netto*100)/100, iva: Math.round(r.iva*100)/100, totale: Math.round((r.netto+r.iva)*100)/100,
@@ -6671,6 +6735,20 @@ function datiOrdine(r){
 /* chiede il numero al servizio; poi(numero, dalServizio) */
 function registraOrdine(poi){
   var u = urlAttivazioni(), r = calcola(), dati = datiOrdine(r);
+  /* SER 09/11: l'ordine inserito dal gestionale si registra con il codice di chi lo inserisce (titolare o collaboratore) */
+  if(ordGestAttivo()){
+    if(!syncCfg()){ poi("", false, "", "Per gli ordini inseriti dal gestionale questo dispositivo deve essere collegato al servizio (Comunicazioni \u2192 Collega un telefono)."); return; }
+    dati.azione = "ordineGestNuovo"; dati.sel = JSON.stringify(selDaSalvare());
+    syncChiama(dati, function(j){
+      if(j && j.ok && j.numero){ poi(j.numero, true, j.chiave || ""); return; }
+      poi("", false, "", !j ? "Il servizio non risponde: l\u2019ordine non \u00e8 partito. Riprova fra poco."
+        : j.motivo === "azione" ? "Il servizio su Cloudflare \u00e8 a una versione vecchia: incolla la versione 16, poi riprova. L\u2019ordine non \u00e8 partito."
+        : j.motivo === "gia sostituito" ? "Questo ordine \u00e8 gi\u00e0 stato modificato (n. " + (j.da || "") + "): annulla e modifica l\u2019ultima versione dalla scheda \u00abI miei ordini\u00bb."
+        : j.motivo === "non tuo" ? "Questo ordine non \u00e8 tuo: lo pu\u00f2 modificare solo chi l\u2019ha inserito (o il titolare)."
+        : "Il servizio non ha registrato l\u2019ordine (" + (j.motivo || "errore") + "). Riprova.");
+    });
+    return;
+  }
   function locale(){
     var c = (Number(load("pavpro.ordini.cont", 0)) || 0) + 1; save("pavpro.ordini.cont", c);
     poi("L-" + ("0000" + c).slice(-4), false);
@@ -6793,9 +6871,13 @@ document.addEventListener("click", function(e){
    "wa" o "mail" da soli. */
 function mandaOrdinePdf(via, m){
   m.className = "msg"; m.textContent = "Registro l\u2019ordine e preparo il PDF\u2026";
-  registraOrdine(function(numero, dalServizio, chiave){
-    ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio, chiave:chiave||"", sostituisce: ORD_MODIFICA ? ORD_MODIFICA.numero : ""};
+  registraOrdine(function(numero, dalServizio, chiave, errore){
+    if(errore){ m.className = "msg err"; m.textContent = errore; return; }
+    var og = ordGestAttivo() ? ORD_GEST : null;
+    ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio, chiave:chiave||"", sostituisce: og ? (og.sostituisce || "") : (ORD_MODIFICA ? ORD_MODIFICA.numero : ""),
+                    gest: og ? {cliente:og.nome, chi:chiOrdGest()} : null};
     mandaOrdinePdf2(via, m);
+    if(og){ ORD_GEST = null; drop("pavpro.ordgest.v1"); disegnaOrdGest(); setTimeout(function(){ ordGestCarica(); }, 3000); return; }
     if(ORD_MODIFICA){
       var l = ordiniLocali(); l.forEach(function(o){ if(o.numero === ORD_MODIFICA.numero) o.sostituitoDa = numero; }); save("pavpro.ordini.v1", l);
       ORD_MODIFICA = null; drop("pavpro.ordmod.v1"); disegnaModifica(); disegnaMieiOrdini();
@@ -6807,13 +6889,15 @@ function mandaOrdinePdf2(via, m){
   try{ blob = pdfOrdine(); }catch(e){ m.className="msg err"; m.textContent="Non riesco a preparare il PDF: " + e.message; return; }
   var rr = calcola();
   blobABase64(blob, function(b64){
+    if(ORD_CORRENTE.gest){ if(ORD_CORRENTE.dalServizio) mandaPdfAlServizio(ORD_CORRENTE.numero, b64); return; }
     ordSalvaLocale({numero:ORD_CORRENTE.numero, quando:ORD_CORRENTE.quando, sistema:rr.g.nome, totale:Math.round((rr.netto+rr.iva)*100)/100, imponibile:Math.round(rr.netto*100)/100,
                     sostituisce:ORD_CORRENTE.sostituisce || "", sel:Object.assign(clone(load(K.sel, null) || {}), {pz:clone(S.pz || {})})}, b64);
     if(ORD_CORRENTE.dalServizio) mandaPdfAlServizio(ORD_CORRENTE.numero, b64);
     disegnaMieiOrdini();
   });
   var lk = linkPdfOrdine(), intest = (ORD_CORRENTE.sostituisce ? T("MODIFICA") + " \u2014 " : "") + T("Ordine n.") + " " + ORD_CORRENTE.numero + " " + T("di") + " " + (S.rif || "cliente") + " " + T("per") + " " + (AZIENDA.nome || "Design Systems")
-    + (ORD_CORRENTE.sostituisce ? " (" + T("sostituisce l\u2019ordine n.") + " " + ORD_CORRENTE.sostituisce + ")" : "");
+    + (ORD_CORRENTE.sostituisce ? " (" + T("sostituisce l\u2019ordine n.") + " " + ORD_CORRENTE.sostituisce + ")" : "")
+    + (ORD_CORRENTE.gest ? " \u2014 inserito da " + ORD_CORRENTE.gest.chi : "");
   /* il messaggio breve per WhatsApp: col link al PDF firmato quando il servizio c'e' */
   var breve = intest + (lk ? "\n" + T("PDF firmato:") + " " + lk : " " + T("\u2014 il dettaglio \u00e8 nel PDF allegato."));
   var testoMail = T("Ordine n.") + " " + ORD_CORRENTE.numero + (lk ? "\n" + T("PDF firmato:") + " " + lk : "") + "\n\n" + testoRiepilogo();
@@ -6860,6 +6944,7 @@ function recapitiOrdini(){
      cliente (rivenditore) si aggiungono dopo, come copie */
   var wa = [numeroWa(AZIENDA.wa)].filter(Boolean), mail = [String(AZIENDA.mail||"").trim()].filter(Boolean), riservati = false;
   var d = (LINK_CLI && LINK_CLI.attivato && LINK_CLI.dest) ? LINK_CLI.dest : null;
+  if(!d && ordGestAttivo()){ var cog = clienti.find(function(x){ return x.id === ORD_GEST.cliId; }); d = (cog && cog.dest) || null; }   // l'ordine inserito dal gestionale va anche al rivenditore del cliente
   if(d){
     (d.wa||[]).map(numeroWa).filter(Boolean).forEach(function(n){ if(wa.indexOf(n) < 0){ wa.push(n); riservati = true; } });
     (d.mail||[]).map(function(x){ return String(x||"").trim().toLowerCase(); }).filter(Boolean).forEach(function(m){ if(mail.map(function(y){ return y.toLowerCase(); }).indexOf(m) < 0){ mail.push(m); riservati = true; } });
@@ -6904,6 +6989,10 @@ function numeroWa(v){
 function mancanzeOrdine(){
   var m = [];
   if(!String(S.rif||"").trim()) m.push("il nome del cliente");
+  if(ordGestAttivo()){
+    if(!ogPrezziGiusti()) m.push("i prezzi e lo sconto di " + ORD_GEST.nome + " (\u00e8 aperto il listino di un altro: premi \u00abRimetti i prezzi di " + ORD_GEST.nome + "\u00bb qui in alto)");
+    scelteMancanti().forEach(function(x){ m.push(x.v.nome + " (" + T(titoloScelta(x.v)) + ")"); }); return m;
+  }
   if(!(S.privacy && S.privacy.quando)) m.push("la spunta dell'informativa privacy");
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(S.mail||"").trim())) m.push("un'email valida");
   if(!numeroWa(S.wa)) m.push("il numero WhatsApp col prefisso");
@@ -6919,7 +7008,7 @@ function aggiornaInvii(r){
 
   $("titoloRiep").textContent = "Riepilogo dell'ordine";
   ["oblRif","oblWa","oblMail","oblFirma"].forEach(function(id){
-    var el = $(id); el.className = "obbl"; el.textContent = "\u2014 obbligatorio";
+    var el = $(id); el.className = "obbl"; el.textContent = (ordGestAttivo() && id !== "oblRif") ? "\u2014 facoltativo (ordine inserito da te)" : "\u2014 obbligatorio";
   });
   disegnaPrivacy();
   var fs = $("firmaStato");
@@ -6946,6 +7035,7 @@ function aggiornaInvii(r){
   }
 
   var mancano = ordine ? mancanzeOrdine() : [];
+  if(ORD_GEST) disegnaOrdGest();
   var senzaRecapiti = ordine && !numDest && !mailDest;
   var bloccato = mancano.length > 0 || senzaRecapiti;
 
@@ -6972,6 +7062,9 @@ function aggiornaInvii(r){
                      + 'l\u2019ordine non pu\u00f2 partire. Avvisaci e te ne mandiamo una aggiornata.</b>';
     } else if(mancano.length){
       dest.innerHTML = '<b style="color:var(--signal)">Per mandare l\u2019ordine manca ' + esc(mancano.join(", ")) + '.</b>';
+    } else if(ordGestAttivo()){
+      dest.textContent = "Ordine per " + ORD_GEST.nome + ", inserito da " + chiOrdGest() + ": si registra a nome tuo (scheda \u00abI miei ordini\u00bb) e arriva a " + (AZIENDA.nome || "l\u2019azienda")
+        + " in PDF come quelli dei clienti: il PDF su WhatsApp" + (numDest ? " (" + numDest + ")" : "") + " e il testo completo per email" + (mailDest ? " (" + mailDest + ")" : "") + ".";
     } else if(rcO.riservati){
       dest.textContent = "L\u2019ordine arriva al tuo fornitore su due canali insieme: il PDF su WhatsApp e il testo completo per email.";
     } else {
@@ -7110,6 +7203,8 @@ function mostraVista(v){
   $("vCod").hidden    = v!=="cod";
   $("vCom").hidden    = v!=="com";
   $("vAvvisi").hidden = v!=="avvisi";
+  $("vMiei").hidden   = v!=="miei";
+  $("tabMiei").setAttribute("aria-selected", String(v==="miei"));
   $("tabPrev").setAttribute("aria-selected", String(v==="prev"));
   $("tabGest").setAttribute("aria-selected", String(v==="gest"));
   $("tabCod").setAttribute("aria-selected", String(v==="cod"));
@@ -7282,8 +7377,8 @@ $("btnGest").addEventListener("click", function(){
     if(cliListino) apriListinoDi(null);
     S.gestione = false; S.modifica = null;
     $("btnGest").setAttribute("aria-pressed","false");
-    $("tabGest").hidden = true; $("tabCod").hidden = true; $("tabCom").hidden = true;
-    mostraVista("prev"); disegna();
+    $("tabGest").hidden = true; $("tabCod").hidden = true; $("tabCom").hidden = true; $("tabMiei").hidden = true;
+    mostraVista("prev"); disegna(); disegnaOrdGest();
     return;
   }
   apriPassword();
@@ -7341,8 +7436,9 @@ function entraInGestione(){
   var div = document.getElementById("pwPanel");
   S.gestione = true;
   $("btnGest").setAttribute("aria-pressed","true");
-  $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false;
+  $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false; $("tabMiei").hidden = false;
   if(div) div.remove();
+  ogRiprendi();
   disegna(); disegnaGenSconti(); disegnaSpazio(); disegnaCom();
   if(typeof disegnaRichieste === "function") disegnaRichieste();
   if(typeof avviaControlloOrdini === "function") avviaControlloOrdini();
@@ -7520,7 +7616,7 @@ function leggiModulo(){
   for(var e2 = 0; e2 < destMail.length; e2++) if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(destMail[e2])) return {err:"Email per gli ordini non valida: " + destMail[e2]};
   return {nome:$("genNome").value.trim(), note:$("genNote").value.trim(), base:base, ecc:ecc, eccP:eccP, scad:scad,
           tel:$("genTel").value.trim(), mail:$("genMail").value.trim(),
-          riv:$("genRiv").checked, rivDi:$("genRivDi").value || null, dest:(destWa.length || destMail.length) ? {wa:destWa, mail:destMail} : null};
+          riv:$("genRiv").checked, rivDi:(!$("genRiv").checked && $("genRivDi").value) || null, dest:(destWa.length || destMail.length) ? {wa:destWa, mail:destMail} : null};
 }
 function righeNonVuote(t){ return String(t||"").split(/[\n,;]+/).map(function(x){ return x.trim(); }).filter(Boolean); }
 
@@ -7533,6 +7629,7 @@ function scriviModulo(c){
   disegnaSceltaRivenditore(c);
   $("genDestWa").value = c && c.dest && c.dest.wa ? c.dest.wa.join("\n") : "";
   $("genDestMail").value = c && c.dest && c.dest.mail ? c.dest.mail.join("\n") : "";
+  SUOI_SEL = null; $("genSuoiCerca").value = ""; disegnaSuoiClienti(c ? c.id : null);
   $("genBase").value = c ? c.base : 20;
   $("genScad").value = c && c.scad ? c.scad : "";
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++){
@@ -7687,8 +7784,10 @@ $("btnGenera").addEventListener("click", function(){
   var code = creaCodice(d.base, d.ecc, d.scad, d.eccP);
   var ora = new Date().toISOString();
   var idSalvato = cliInModifica;
+  var primaRiv = {tel:"", mail:"", riv:false};
   if(cliInModifica){
     var c = clienti.find(function(x){ return x.id === cliInModifica; });
+    if(c) primaRiv = {tel:c.tel || "", mail:c.mail || "", riv:!!c.riv};
     if(c){ c.nome=d.nome; c.note=d.note; c.tel=d.tel; c.mail=d.mail; c.base=d.base; c.ecc=d.ecc; c.eccP=d.eccP; c.scad=d.scad; c.code=code; c.aggiornato=ora; c.riv=!!d.riv; if(d.dest) c.dest=d.dest; else delete c.dest; if(d.rivDi && d.rivDi !== c.id) c.rivDi=d.rivDi; else delete c.rivDi; }
   } else {
     idSalvato = "c"+uidNuovo();
@@ -7698,10 +7797,12 @@ $("btnGenera").addEventListener("click", function(){
     if(d.rivDi) nuovoCli.rivDi = d.rivDi;
     if(riusaDa){
       var sorg = clienti.find(function(x){ return x.id === riusaDa.id; });
-      if(sorg && sorg.voci && Object.keys(sorg.voci).length) nuovoCli.voci = clone(sorg.voci);
+      if(haListinoSuo(sorg)){ nuovoCli.voci = prezziCompleti(applicaVociCliente(clone(listinoGenerale()), clone(sorg.voci))); nuovoCli.fisso = true; }   // copia bloccata, tutta: poi vale solo per lui
     }
     clienti.unshift(nuovoCli);
   }
+  var rvSalv = clienti.find(function(x){ return x.id === idSalvato; }), coll = {dentro:0, tolti:0};
+  if(rvSalv && (rvSalv.riv || primaRiv.riv)) coll = collegaSuoiClienti(rvSalv, primaRiv);
   if(!salvaClienti()) return;
   /* l'ordine mostra subito i numeri appena scritti. Si cerca per scheda e non
      per codice: due clienti con gli stessi sconti hanno lo stesso codice, e
@@ -7722,7 +7823,9 @@ $("btnGenera").addEventListener("click", function(){
     + (d.scad ? ", scade il "+new Date(d.scad).toLocaleDateString("it-IT") : ", senza scadenza")
     + ". L\u2019ordine adesso usa i suoi sconti."
     + (cliInModifica ? " Il codice \u00e8 cambiato: mandaglielo di nuovo (o rigenera la sua app)." : "")
-    + (code.length > 64 ? " \u00c8 lungo da battere a mano: meglio copiarlo." : "");
+    + (code.length > 64 ? " \u00c8 lungo da battere a mano: meglio copiarlo." : "")
+    + (coll.dentro ? " " + coll.dentro + (coll.dentro === 1 ? " cliente collegato" : " clienti collegati") + " a " + d.nome + ": " + (coll.dentro === 1 ? "i suoi" : "i loro") + " ordini gli arrivano in copia." : "")
+    + (coll.tolti ? " " + coll.tolti + (coll.tolti === 1 ? " cliente scollegato" : " clienti scollegati") + " da " + d.nome + ": " + (coll.tolti === 1 ? "i suoi" : "i loro") + " ordini non gli arrivano pi\u00f9." : "");
   /* il modulo si svuota: senza, il cliente dopo erediterebbe in silenzio
      gli sconti di questo, ed e un errore che costa soldi */
   cliInModifica = null;
@@ -8010,6 +8113,9 @@ function cartellaSito(){
 function applicaListino(p){
   if(!p || !p.listino || !Array.isArray(p.listino.gruppi) || !p.listino.gruppi.length) return false;
   listino = normalizza(p.listino);
+  /* SER 09/11: i prezzi del cliente (dal link o dentro al file) tornano sopra al listino nuovo */
+  if(LINK_CLI && LINK_CLI.voci && !LINK_CLI.daConfermare) listino = applicaVociCliente(listino, clone(LINK_CLI.voci));
+  else if(DATI && DATI.vociCliente) listino = applicaVociCliente(listino, clone(DATI.vociCliente));
   ALLEGATI = p.allegati || null;
   if(typeof p.sfrido === "number" && !S.scartoMio){ S.scarto = p.sfrido; $("scarto").value = p.sfrido; }
   if(p.azienda && (p.azienda.wa || p.azienda.mail)) AZIENDA = p.azienda;
@@ -8766,6 +8872,186 @@ $("btnRegistro").addEventListener("click", function(){
   });
 });
 $("regChi").addEventListener("change", disegnaRegistro);
+/* ------------------------------------------------------------------
+   SER 09/11: ORDINI INSERITI DAL GESTIONALE
+   Il titolare o un collaboratore sceglie un cliente, compone l'ordine nella scheda "Ordine" con i prezzi e gli
+   sconti di quel cliente e lo manda: parte in PDF come quelli dei clienti, si registra sul servizio a nome di chi
+   l'ha inserito e resta nella scheda "I miei ordini" (ognuno vede i suoi, il titolare tutti), dove si riapre per
+   modificarlo (stesso numero con -M1, -M2...). Il registro dice chi ha creato, modificato o eliminato cosa.
+   ------------------------------------------------------------------ */
+var ORD_GEST = CLIENTE ? null : load("pavpro.ordgest.v1", null);   // {cliId, nome, sostituisce, quando}: l'ordine che si sta inserendo su questo dispositivo
+var OG = { ordini: [], registro: [], titolare: false, caricato: false };
+function ordGestAttivo(){ return !CLIENTE && !!S.gestione && !!(ORD_GEST && ORD_GEST.cliId); }
+function chiOrdGest(){ return SYNC.ruolo === "collaboratore" ? (SYNC.nome || "un collaboratore") : (AZIENDA.nome || "Design Systems") + " (titolare)"; }
+function infoOrdGest(){ return ordGestAttivo() ? {cliente:ORD_GEST.nome, chi:chiOrdGest()} : ((ORD_CORRENTE && ORD_CORRENTE.gest) || null); }
+function selDaSalvare(){ salvaSel(); return Object.assign(clone(load(K.sel, null) || {}), {pz:clone(S.pz || {})}); }
+function nomeChiOg(c){ if(!c) return ""; return c.titolare ? (OG.titolare ? "Tu (titolare)" : "Titolare") : (c.nome || "collaboratore"); }
+/* un ordine per un cliente lasciato a meta' (pagina ricaricata, gestione riaperta): tornano i prezzi e lo sconto di quel cliente */
+function ogRiprendi(){
+  if(ordGestAttivo()){
+    var c = clienti.find(function(x){ return x.id === ORD_GEST.cliId; });
+    if(c){
+      var pz = clone(S.pz || {});
+      if(c.voci && Object.keys(c.voci).length){ if(cliListino !== c.id) apriListinoDi(c.id); }
+      else if(cliListino) apriListinoDi(null);
+      if(!attivaCliente(c)){ cliente = null; drop(K.cli); }
+      S.pz = pz; disegna();
+    }
+  }
+  disegnaOrdGest();
+}
+/* il listino aperto e lo sconto attivo sono proprio quelli del cliente dell'ordine? (mai i prezzi di un altro) */
+function ogPrezziGiusti(){
+  if(!ordGestAttivo()) return true;
+  var c = clienti.find(function(x){ return x.id === ORD_GEST.cliId; }); if(!c) return true;
+  var suoListino = (c.voci && Object.keys(c.voci).length) ? cliListino === c.id : !cliListino;
+  var suoSconto = c.code ? !!(cliente && cliente.id === c.id) : !cliente;
+  return suoListino && suoSconto;
+}
+function disegnaOrdGest(){
+  var box = document.getElementById("cardOrdGest"); if(!box) return;
+  box.hidden = !ordGestAttivo();
+  $("btnOgPrezzi").hidden = box.hidden || ogPrezziGiusti();
+  if(box.hidden) return;
+  $("btnOgPrezzi").textContent = "Rimetti i prezzi di " + ORD_GEST.nome;
+  $("ogBanTitolo").textContent = (ORD_GEST.sostituisce ? "Modifica dell’ordine n. " + ORD_GEST.sostituisce + " — " : "Ordine per ") + ORD_GEST.nome;
+  $("ogBanTesto").textContent = "Lo stai inserendo tu (" + chiOrdGest() + ") dal gestionale: prezzi e sconti sono quelli di " + ORD_GEST.nome + ". Firma, email e WhatsApp del cliente sono facoltativi. "
+    + (ORD_GEST.sostituisce ? "Quando premi «Manda l’ordine» arriva come modifica e sostituisce l’ordine n. " + ORD_GEST.sostituisce + "."
+                            : "Quando premi «Manda l’ordine» si registra a nome tuo nella scheda «I miei ordini».");
+}
+/* applica le scelte salvate di un ordine (per modificarlo) */
+function ogApplicaSel(sel){
+  ["realizza","rivDiverso","colore","colsel","colq","stencil","granulo","conf","fin","colgr","colpct","cons","spessore","incluso"].forEach(function(k){
+    S[k] = (sel[k] && typeof sel[k] === "object") ? clone(sel[k]) : {};
+  });
+  ["mq","mqRiv","scarto","ricarico"].forEach(function(k){ if(typeof sel[k] === "number") S[k] = sel[k]; });
+  if(sel.gruppo) S.gruppo = sel.gruppo;
+  if(sel.variante) S.variante = sel.variante;
+  if(sel.vista === "cliente" || sel.vista === "niente" || sel.vista === "tutto") S.vista = sel.vista;
+  S.rif = sel.rif || ""; S.wa = sel.wa || ""; S.mail = sel.mail || ""; S.note = sel.note || "";
+  S.privacy = (sel.privacy && sel.privacy.quando) ? sel.privacy : null;
+  S.pz = (sel.pz && typeof sel.pz === "object") ? clone(sel.pz) : {};
+}
+/* un ordine nuovo (sel null) o la modifica di uno gia' mandato (sost = numero, sel = le sue scelte) */
+function ogInizia(c, sost, sel){
+  if(c.voci && Object.keys(c.voci).length) apriListinoDi(c.id);       // i suoi prezzi e i suoi sconti
+  else if(cliListino) apriListinoDi(null);
+  if(!attivaCliente(c)){ cliente = null; drop(K.cli); }               // senza codice valido: nessuno sconto (mai quello di un altro cliente)
+  S.pz = {}; S.modifica = null;
+  if(sel) ogApplicaSel(sel);
+  else {
+    ["realizza","rivDiverso","colore","colsel","colq","stencil","granulo","conf","fin","colgr","colpct","cons","spessore","incluso"].forEach(function(k){ S[k] = {}; });
+    S.note = ""; S.privacy = null;
+  }
+  if(!sel || !String(S.rif || "").trim()) S.rif = c.nome || "";
+  if(!sel || !S.wa) S.wa = c.tel || "";
+  if(!sel || !S.mail) S.mail = c.mail || "";
+  if(!listino.gruppi.some(function(g){ return g.id === S.gruppo; })) S.gruppo = listino.gruppi[0].id;
+  if(!gruppoCorrente().varianti.some(function(v){ return v.id === S.variante; })) S.variante = gruppoCorrente().varianti[0].id;
+  ORD_GEST = {cliId:c.id, nome:c.nome || "(senza nome)", sostituisce:sost || "", quando:new Date().toISOString()};
+  save("pavpro.ordgest.v1", ORD_GEST);
+  ORD_CORRENTE = null;
+  salvaSel();
+  try{ $("btnFirmaPulisci").click(); }catch(e){}
+  mostraVista("prev"); disegna(); disegnaOrdGest();
+  $("rifCliente").value = S.rif || ""; $("waNum").value = S.wa || ""; $("mailDest").value = S.mail || ""; $("noteOrd").value = S.note || ""; $("mq").value = S.mq; $("scarto").value = S.scarto;
+  if(typeof disegnaPrivacy === "function") disegnaPrivacy();
+  setTimeout(function(){ try{ $("cardOrdGest").scrollIntoView({block:"start", behavior:"smooth"}); }catch(e){} }, 50);
+}
+function disegnaOgClienti(){
+  var sel = $("ogCli"), cur = sel.value;
+  var l = clienti.slice().sort(function(a, b){ return String(a.nome || "").localeCompare(String(b.nome || ""), "it"); });
+  sel.innerHTML = '<option value="">Scegli il cliente…</option>' + l.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.nome || "(senza nome)") + '</option>'; }).join("");
+  if(l.some(function(c){ return c.id === cur; })) sel.value = cur;
+}
+function ordGestCarica(){
+  var m = $("ogElencoMsg");
+  if(!syncCfg()){ m.className = "msg err"; m.textContent = "Questo dispositivo non è collegato al servizio: collegalo (Comunicazioni → Collega un telefono) per inserire e vedere gli ordini."; $("ogElenco").innerHTML = ""; $("ogRegistro").innerHTML = ""; return; }
+  m.className = "msg"; m.textContent = "Chiedo gli ordini al servizio…";
+  syncChiama({azione:"ordiniGest"}, function(j){
+    if(!j || !j.ok){ m.className = "msg err"; m.textContent = (j && j.motivo === "azione") ? "Il servizio su Cloudflare è a una versione vecchia: incolla la versione 16." : "Il servizio non risponde, riprova."; return; }
+    OG.ordini = j.ordini || []; OG.registro = j.registro || []; OG.titolare = !!j.titolare; OG.caricato = true;
+    m.textContent = "";
+    var nomi = [];
+    OG.ordini.forEach(function(o){ var n = nomeChiOg(o.creatoDa); if(n && nomi.indexOf(n) < 0) nomi.push(n); });
+    var sc = $("ogChi"), cur = sc.value;
+    sc.hidden = !OG.titolare || nomi.length < 2;
+    sc.innerHTML = '<option value="">Tutti</option>' + nomi.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join("");
+    sc.value = nomi.indexOf(cur) >= 0 ? cur : "";
+    disegnaOgElenco();
+  });
+}
+function disegnaOgElenco(){
+  var chi = $("ogChi").hidden ? "" : $("ogChi").value;
+  $("ogTitoloElenco").textContent = OG.titolare ? "Ordini inseriti dal gestionale" : "I miei ordini";
+  var l = OG.ordini.filter(function(o){ return !chi || nomeChiOg(o.creatoDa) === chi; });
+  $("ogConta").textContent = OG.caricato ? "(" + l.length + ")" : "";
+  if(OG.caricato && !l.length) $("ogElencoMsg").textContent = "Nessun ordine ancora: scegline il cliente qui sopra e premi «Inizia l’ordine».";
+  $("ogElenco").innerHTML = l.map(function(o){
+    var q = o.quando ? new Date(o.quando) : null, cl = o.cliente || {};
+    return '<div class="cliente"' + (o.sostituitoDa ? ' style="opacity:.55"' : '') + '><span class="nm">' + (o.sostituisce ? '<span style="color:var(--signal)">MODIFICA</span> · ' : '') + 'Ordine n. ' + esc(o.numero) + ' · ' + esc(cl.nome || "(senza nome)")
+      + (o.sostituisce ? ' <small style="font-weight:500">· sostituisce il n. ' + esc(o.sostituisce) + '</small>' : '') + (o.sostituitoDa ? ' <small style="font-weight:500;color:var(--signal)">· sostituito dal n. ' + esc(o.sostituitoDa) + '</small>' : '') + '</span>'
+      + '<span class="az"><button class="btn sec small" type="button" data-ogpdf="' + esc(o.numero) + '"' + (o.pdf ? '' : ' disabled') + '>PDF</button>'
+      + (o.sostituitoDa ? '' : '<button class="btn sec small" type="button" data-ogmod="' + esc(o.numero) + '">Modifica</button>')
+      + (numeroWa(cl.tel) && o.pdf && !o.sostituitoDa ? '<button class="btn sec small" type="button" data-ogwa="' + esc(o.numero) + '">Manda al cliente</button>' : '') + '</span>'
+      + '<span class="dt">' + (q ? q.toLocaleDateString("it-IT") + " " + q.toLocaleTimeString("it-IT", {hour:"2-digit", minute:"2-digit"}) : "") + ' · ' + esc(o.sistema || "") + ' · ' + N(o.mq || 0) + ' m² · imponibile ' + E(o.imponibile || 0) + ' · <b>totale ' + E(o.totale || 0) + '</b>'
+      + ' · inserito da <b>' + esc(nomeChiOg(o.creatoDa)) + '</b>' + (o.modificatoDa ? ' · modificato da <b>' + esc(nomeChiOg(o.modificatoDa)) + '</b>' : '')
+      + (o.mail ? (o.mail.ok ? ' · <span style="color:var(--ok)">email mandata dal servizio</span>' : ' · <span style="color:var(--signal)">email del servizio non mandata: ' + esc(o.mail.motivo || "") + '</span>') : '')
+      + '</span></div>';
+  }).join("");
+  var reg = OG.registro.filter(function(e){ return !chi || (e.titolare ? (OG.titolare ? "Tu (titolare)" : "Titolare") : e.chi) === chi || e.per === chi || (chi === "Tu (titolare)" && e.perId === ""); });
+  var VERBO = {creato:"ha inserito l’ordine", modificato:"ha modificato l’ordine", eliminato:"ha eliminato l’ordine"};
+  $("ogRegistro").innerHTML = reg.length ? reg.slice(0, 200).map(function(e){
+    var q = new Date(e.quando);
+    return '<div class="avviso" style="margin-top:8px"><div class="quando">' + esc(q.toLocaleString("it-IT", {day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"})) + '</div>'
+      + '<div style="font-size:13.5px"><b>' + esc(e.titolare ? (OG.titolare ? "Tu (titolare)" : "Titolare") : e.chi) + '</b> ' + esc(VERBO[e.azione] || e.azione) + ' n. ' + esc(e.numero)
+      + (e.sostituisce ? ' (sostituisce il n. ' + esc(e.sostituisce) + ')' : '') + ' · ' + esc(e.cliente || "") + (e.totale ? ' · ' + E(Number(e.totale)) : '')
+      + (e.per && e.per !== e.chi ? ' · ordine di ' + esc(e.perId === "" ? (OG.titolare ? "te (titolare)" : "titolare") : e.per) : '') + '</div></div>';
+  }).join("") : '<p class="hint" style="margin:6px 0 0">Ancora niente nel registro.</p>';
+}
+$("tabMiei").addEventListener("click", function(){ mostraVista("miei"); disegnaOgClienti(); ordGestCarica(); });
+$("btnOgAgg").addEventListener("click", ordGestCarica);
+$("ogChi").addEventListener("change", disegnaOgElenco);
+$("btnOgElenco").addEventListener("click", function(){ $("tabMiei").click(); });
+$("btnOgPrezzi").addEventListener("click", function(){ ogRiprendi(); });
+$("btnOgAnnulla").addEventListener("click", function(){
+  ORD_GEST = null; drop("pavpro.ordgest.v1"); disegnaOrdGest(); aggiornaInvii(calcola());
+  var m = $("copyMsg"); m.className = "msg"; m.textContent = "Ordine per il cliente annullato: non è partito niente.";
+});
+$("btnOgNuovo").addEventListener("click", function(){
+  var m = $("ogMsg"), c = clienti.find(function(x){ return x.id === $("ogCli").value; });
+  if(!c){ m.className = "msg err"; m.textContent = "Scegli prima il cliente."; $("ogCli").focus(); return; }
+  if(!syncCfg()){ m.className = "msg err"; m.textContent = "Questo dispositivo non è collegato al servizio: collegalo (Comunicazioni → Collega un telefono), poi riprova."; return; }
+  m.textContent = "";
+  ogInizia(c, "", null);
+});
+$("ogElenco").addEventListener("click", function(e){
+  var t = e.target.closest("[data-ogpdf],[data-ogmod],[data-ogwa]"); if(!t) return;
+  var m = $("ogElencoMsg");
+  if(t.hasAttribute("data-ogpdf")){
+    var n = t.getAttribute("data-ogpdf");
+    m.className = "msg"; m.textContent = "Scarico il PDF dell’ordine " + n + "…";
+    syncChiama({azione:"ordinePdf", numero:n}, function(j){ if(j && j.ok && j.pdf){ apriPdfB64(j.pdf, "Ordine-" + n + ".pdf"); m.textContent = ""; } else { m.className = "msg err"; m.textContent = "PDF non disponibile."; } });
+    return;
+  }
+  if(t.hasAttribute("data-ogwa")){
+    var o = OG.ordini.find(function(x){ return x.numero === t.getAttribute("data-ogwa"); }); if(!o) return;
+    var a = attImpostazioni(), lk = (o.chiave && /^https?:\/\//i.test(a.url || "")) ? a.url.replace(/\/+$/, "") + "/o/" + o.numero + "/" + o.chiave : "";
+    apriWhatsApp(numeroWa(o.cliente.tel), "Ciao, ecco il tuo ordine n. " + o.numero + " con " + (AZIENDA.nome || "Design Systems") + (o.sistema ? "\n" + o.sistema : "") + (o.totale ? " · totale " + E(Number(o.totale)) : "") + (lk ? "\nPDF: " + lk : ""));
+    return;
+  }
+  var nm = t.getAttribute("data-ogmod");
+  m.className = "msg"; m.textContent = "Riapro l’ordine " + nm + "…";
+  syncChiama({azione:"ordineGest", numero:nm}, function(j){
+    if(!j || !j.ok || !j.ordine){ m.className = "msg err"; m.textContent = (j && j.motivo === "non tuo") ? "Questo ordine non è tuo." : "Non riesco a riaprire l’ordine, riprova."; return; }
+    var o = j.ordine, sel = null;
+    try{ sel = o.sel ? JSON.parse(o.sel) : null; }catch(err){ sel = null; }
+    if(!sel){ m.className = "msg err"; m.textContent = "Di questo ordine non ho le scelte salvate: non si può riaprire."; return; }
+    var c = clienti.find(function(x){ return x.id === o.id; }) || {id:o.id, nome:(o.cliente && o.cliente.nome) || "", tel:(o.cliente && o.cliente.tel) || "", mail:(o.cliente && o.cliente.mail) || ""};
+    m.textContent = "";
+    ogInizia(c, o.numero, sel);
+  });
+});
 /* gli ordini ricevuti, dal servizio */
 var ORDINI_FILTRO = null;      // {id, nome} del cliente di cui vedere gli ordini, o null per tutti
 function disegnaOrdiniRicevuti(filtro){
@@ -8787,7 +9073,8 @@ function disegnaOrdiniRicevuti(filtro){
       box.innerHTML = l.map(function(o){
         var q = o.quando ? new Date(o.quando) : null;
         return '<div class="cliente"' + (o.sostituitoDa ? ' style="opacity:.55"' : '') + '><span class="nm">' + (o.sostituisce ? '<span style="color:var(--signal)">MODIFICA</span> \u00b7 ' : '') + 'Ordine n. ' + esc(o.numero) + ' \u00b7 ' + esc((o.cliente && o.cliente.nome) || "(senza nome)")
-          + (o.sostituisce ? ' <small style="font-weight:500">\u00b7 sostituisce il n. ' + esc(o.sostituisce) + '</small>' : '') + (o.sostituitoDa ? ' <small style="font-weight:500;color:var(--signal)">\u00b7 sostituito dal n. ' + esc(o.sostituitoDa) + '</small>' : '') + '</span>'
+          + (o.sostituisce ? ' <small style="font-weight:500">\u00b7 sostituisce il n. ' + esc(o.sostituisce) + '</small>' : '') + (o.sostituitoDa ? ' <small style="font-weight:500;color:var(--signal)">\u00b7 sostituito dal n. ' + esc(o.sostituitoDa) + '</small>' : '')
+          + (o.creatoDa ? ' <small style="font-weight:500">\u00b7 inserito dal gestionale da ' + esc(o.creatoDa.titolare ? "titolare" : o.creatoDa.nome) + '</small>' : '') + '</span>'
           + '<span class="az"><button class="btn sec small" type="button" data-ordadm="' + esc(o.numero) + '"' + (o.pdf ? '' : ' disabled') + '>PDF firmato</button>'
           + '<button class="btn sec small" type="button" data-orddel="' + esc(o.numero) + '">Elimina</button></span>'
           + '<span class="dt">' + (q ? q.toLocaleDateString("it-IT") + " " + q.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : "") + ' \u00b7 ' + esc(o.sistema||"") + ' \u00b7 ' + N(o.mq||0) + ' m\u00b2 \u00b7 imponibile ' + E(o.imponibile||0) + ' \u00b7 <b>totale ' + E(o.totale||0) + '</b>'
@@ -8812,6 +9099,84 @@ function disegnaStatoNotifiche(){
   if(notificheAttive()){ el.textContent = "Notifiche attive: finch\u00e9 questa gestione resta aperta (anche dietro altre finestre) il Mac ti avvisa di ogni nuovo ordine, con un suono."; b.textContent = "Spegni le notifiche"; }
   else if(Notification.permission === "denied"){ el.textContent = "Il browser ha bloccato le notifiche per questa pagina: sbloccale dalle impostazioni del sito. Intanto gli avvisi compaiono qui dentro e sul tab."; b.hidden = true; }
   else { el.textContent = "Gli avvisi dei nuovi ordini compaiono qui e sul tab \u00abCodici cliente\u00bb. Con il tasto qui sopra arrivano anche come notifica del Mac, con un suono."; b.textContent = "Avvisami dei nuovi ordini"; }
+}
+/* SER 09/11: nella scheda di un rivenditore si spuntano i suoi clienti (i rivenditori non compaiono in elenco).
+   Salvando, ogni cliente spuntato diventa "cliente di" questo rivenditore e i suoi ordini arrivano in copia
+   al WhatsApp e all'email del rivenditore; quelli tolti non gli arrivano piu'. */
+var SUOI_SEL = null, SUOI_DI = null;
+function disegnaSuoiClienti(mio){
+  if(mio !== undefined) SUOI_DI = mio;
+  mio = SUOI_DI;
+  var riv = $("genRiv").checked;
+  $("genRivDiBox").hidden = riv;
+  $("genSuoiBox").hidden = !riv;
+  /* i recapiti in copia restano, ma per un rivenditore valgono solo per gli ordini fatti da lui stesso */
+  $("genDestWaL").textContent = riv ? "Altri WhatsApp per gli ordini fatti da lui (di solito vuoto)" : "WhatsApp che ricevono i suoi ordini (uno per riga)";
+  $("genDestMailL").textContent = riv ? "Altre email per gli ordini fatti da lui (di solito vuoto)" : "Email che ricevono i suoi ordini (una per riga)";
+  $("genRivHint").textContent = riv
+    ? "Qui sotto spunta i clienti di questo rivenditore: i loro ordini arrivano come sempre a noi e in copia anche a lui, al WhatsApp e all\u2019email scritti sopra in questa scheda. I clienti non vedono niente di tutto questo."
+    : "Per un cliente di un rivenditore: scegli il rivenditore dal menu, e qui sotto restano i recapiti a cui arrivano in copia i suoi ordini (si riempiono da soli col WhatsApp e l\u2019email del rivenditore). Il cliente non vede niente di tutto questo.";
+  if(!riv) return;
+  if(!SUOI_SEL){ SUOI_SEL = {}; if(mio) clienti.forEach(function(c){ if(c.rivDi === mio && c.id !== mio) SUOI_SEL[c.id] = 1; }); }
+  var q = String($("genSuoiCerca").value || "").trim().toLowerCase();
+  var l = clienti.filter(function(c){ return c.id !== mio && !c.riv; })
+    .sort(function(a, b){ return String(a.nome || "").localeCompare(String(b.nome || ""), "it"); });
+  var vis = l.filter(function(c){ return !q || String(c.nome || "").toLowerCase().indexOf(q) >= 0 || SUOI_SEL[c.id]; });
+  $("genSuoi").innerHTML = vis.length ? vis.map(function(c){
+    var altro = (c.rivDi && c.rivDi !== mio) ? clienti.find(function(x){ return x.id === c.rivDi && x.riv; }) : null;
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13.5px;border-bottom:1px solid var(--line)"><input type="checkbox" data-suo="' + esc(c.id) + '"' + (SUOI_SEL[c.id] ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:var(--accent)"> <span>' + esc(c.nome || "(senza nome)")
+      + (altro ? ' <small style="color:var(--muted)">\u00b7 ora \u00e8 cliente di ' + esc(altro.nome || "") + (SUOI_SEL[c.id] ? ': salvando passa a questo' : '') + '</small>' : '') + '</span></label>';
+  }).join("") : '<p class="hint" style="margin:6px 0">' + (l.length ? "Nessun cliente con questo nome." : "Non ci sono ancora altri clienti: registrali e poi spuntali qui.") + '</p>';
+  var n = Object.keys(SUOI_SEL).length;
+  $("genSuoiInfo").textContent = (n ? n + (n === 1 ? " cliente spuntato" : " clienti spuntati") : "Nessun cliente spuntato") + ": vale quando premi Salva."
+    + ((!$("genTel").value.trim() && !$("genMail").value.trim()) ? " Scrivi sopra il WhatsApp o l\u2019email del rivenditore, se no le copie degli ordini non hanno dove arrivare." : "");
+}
+$("genRiv").addEventListener("change", function(){ disegnaSuoiClienti(); });
+$("genSuoiCerca").addEventListener("input", function(){ disegnaSuoiClienti(); });
+["genTel","genMail"].forEach(function(id){ $(id).addEventListener("input", function(){ if($("genRiv").checked) disegnaSuoiClienti(); }); });
+$("genSuoi").addEventListener("change", function(e){
+  var t = e.target.closest("[data-suo]"); if(!t) return;
+  if(!SUOI_SEL) SUOI_SEL = {};
+  if(t.checked) SUOI_SEL[t.getAttribute("data-suo")] = 1; else delete SUOI_SEL[t.getAttribute("data-suo")];
+  disegnaSuoiClienti();
+});
+function stessoWa(a, b){ var x = numeroWaCliente(a), y = numeroWaCliente(b); return !!x && x === y; }
+function stessaMail(a, b){ return !!String(a || "").trim() && String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase(); }
+function aggiungiRecapitiRiv(c, tel, mail){
+  if(!numeroWaCliente(tel) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(mail || "").trim())) return;
+  c.dest = c.dest || {wa:[], mail:[]}; c.dest.wa = c.dest.wa || []; c.dest.mail = c.dest.mail || [];
+  if(numeroWaCliente(tel) && !c.dest.wa.some(function(x){ return stessoWa(x, tel); })) c.dest.wa.push(String(tel).trim());
+  if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(mail || "").trim()) && !c.dest.mail.some(function(x){ return stessaMail(x, mail); })) c.dest.mail.push(String(mail).trim());
+}
+function togliRecapitiRiv(c, tels, mails){
+  if(!c.dest) return;
+  c.dest.wa = (c.dest.wa || []).filter(function(x){ return !tels.some(function(t){ return stessoWa(x, t); }); });
+  c.dest.mail = (c.dest.mail || []).filter(function(x){ return !mails.some(function(t){ return stessaMail(x, t); }); });
+  if(!c.dest.wa.length && !c.dest.mail.length) delete c.dest;
+}
+/* dopo il salvataggio della scheda di un rivenditore: collega i clienti spuntati, scollega gli altri.
+   prima = {tel, mail, riv} del rivenditore prima del salvataggio. Ritorna {dentro, tolti}. */
+function collegaSuoiClienti(rv, prima){
+  var out = {dentro:0, tolti:0}, ora = new Date().toISOString();
+  var vecchiTel = [prima.tel, rv.tel].filter(Boolean), vecchieMail = [prima.mail, rv.mail].filter(Boolean);
+  clienti.forEach(function(c){
+    if(c.id === rv.id || c.riv) return;
+    var dentro = rv.riv && SUOI_SEL && !!SUOI_SEL[c.id];
+    if(dentro){
+      if(c.rivDi !== rv.id){
+        var vecchio = c.rivDi ? clienti.find(function(x){ return x.id === c.rivDi; }) : null;
+        if(vecchio) togliRecapitiRiv(c, [vecchio.tel], [vecchio.mail]);
+        c.rivDi = rv.id; c.aggiornato = ora; out.dentro++;
+      }
+      if(prima.tel && !stessoWa(prima.tel, rv.tel)) togliRecapitiRiv(c, [prima.tel], []);
+      if(prima.mail && !stessaMail(prima.mail, rv.mail)) togliRecapitiRiv(c, [], [prima.mail]);
+      aggiungiRecapitiRiv(c, rv.tel, rv.mail);
+    } else if(c.rivDi === rv.id && (rv.riv ? SUOI_SEL !== null : prima.riv)){
+      togliRecapitiRiv(c, vecchiTel, vecchieMail);
+      delete c.rivDi; c.aggiornato = ora; out.tolti++;
+    }
+  });
+  return out;
 }
 $("genRivDi").addEventListener("change", function(){
   var rv = clienti.find(function(x){ return x.id === $("genRivDi").value; });
@@ -9184,7 +9549,7 @@ $("btnRichiesta").addEventListener("click", function(){
   d.tel = String(d.telScritto).replace(/[^0-9]/g, "").replace(/^00/, "").replace(/^(3\d{8,9})$/, "39$1");
   /* i campi che mancano si colorano; un messaggio solo (niente frasi corte nel dizionario delle traduzioni) */
   var segna = function(el, male){ el.classList.toggle("ricmanca", !!male); return male ? 1 : 0; };
-  var manca = segna($("ricNome"), !d.nome) + segna($("ricCitta"), !d.citta) + segna($("ricLavoro"), !d.lavoro)
+  var manca = segna($("ricNome"), !d.nome) + segna($("ricDitta"), !d.ditta) + segna($("ricCitta"), !d.citta) + segna($("ricLavoro"), !d.lavoro)
             + segna($("ricTel"), d.tel.length < 10 || d.tel.length > 15) + segna($("ricPrivacy").closest(".privacybox"), !$("ricPrivacy").checked);
   if(manca){ m.className = "msg err"; m.textContent = T("Mancano dei dati: completa i campi segnati in rosso (il numero WhatsApp col prefisso del paese)."); return; }
   var num = numeroWa(AZIENDA.wa);
@@ -9854,7 +10219,7 @@ function agganciaSchedeDiFabbrica(){
    ============================================================ */
 var SYNC_K = "pavpro.sync.v1";
 var SYNC = { pronto:false, attiva:false, quando:null, sporco:false, sporcoPre:false, timer:null, inCorso:false, attPend:{}, poll:null, msg:"", errore:"" };
-var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1 };
+var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1 };
 function syncChiave(k){ return !!k && k.indexOf("pavpro.") === 0 && !SYNC_ESCLUSE[k] && k.indexOf(K.attPre) !== 0; }
 function syncStatoLocale(){
   var d = {};
@@ -10087,7 +10452,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
       var cosa = [];
       if(p.base !== c.base) cosa.push("sconto base " + p.base + "% → " + c.base + "%");
       if(!stessi(p.ecc, c.ecc) || !stessi(p.eccP, c.eccP)) cosa.push("sconti per sistema o prodotto");
-      if(!stessi(p.voci, c.voci)) cosa.push("prezzi suoi");
+      if(!stessi(p.voci, c.voci)) cosa.push(c.fisso && !p.fisso ? "listino suo bloccato" : "prezzi suoi");
       if(p.nome !== c.nome) cosa.push("nome (prima «" + (p.nome || "") + "»)");
       if(p.scad !== c.scad) cosa.push("scadenza");
       if(p.tel !== c.tel || p.mail !== c.mail || !stessi(p.dest, c.dest)) cosa.push("recapiti");
@@ -10247,7 +10612,7 @@ function syncApplica(stato, poi, mie){
   })();
 }
 /* si ricarica per prendere le modifiche degli altri: la gestione resta aperta, sulla stessa scheda e allo stesso punto */
-function vistaCorrente(){ return !$("vGest").hidden ? "gest" : !$("vCod").hidden ? "cod" : !$("vCom").hidden ? "com" : "prev"; }
+function vistaCorrente(){ return !$("vGest").hidden ? "gest" : !$("vCod").hidden ? "cod" : !$("vCom").hidden ? "com" : !$("vMiei").hidden ? "miei" : "prev"; }
 function syncRicarica(){
   try{
     sessionStorage.setItem("pavpro.sync.ricaricato", "1");
@@ -10353,7 +10718,7 @@ if(!CLIENTE){
     disegna();                 // le foto dei sistemi stanno nell'archivio: ora ci sono
     try{ if(sessionStorage.getItem("pavpro.entra") === "1"){ sessionStorage.removeItem("pavpro.entra"); if(syncCfg()){ entraInGestione();   // appena collegato col codice, o ricaricato per le modifiche degli altri
       var vs = JSON.parse(sessionStorage.getItem("pavpro.vista") || "null"); sessionStorage.removeItem("pavpro.vista");
-      if(vs && vs.v && vs.v !== "prev"){ var tb = $("tab" + {gest:"Gest", cod:"Cod", com:"Com"}[vs.v]); if(tb) tb.click(); }
+      if(vs && vs.v && vs.v !== "prev"){ var tb = $("tab" + {gest:"Gest", cod:"Cod", com:"Com", miei:"Miei"}[vs.v]); if(tb) tb.click(); }
       if(vs && vs.y) setTimeout(function(){ window.scrollTo(0, vs.y); }, 200);
     } } }catch(e){}
     try{ if(sessionStorage.getItem("pavpro.tolto") === "1"){ sessionStorage.removeItem("pavpro.tolto");
