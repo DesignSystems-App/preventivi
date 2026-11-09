@@ -828,7 +828,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109140543";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109150343";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1029,12 +1029,33 @@ function aggiornaElencoProdotti(l){
   return PRODOTTI_TUTTI;
 }
 
-function scontoDi(cli, gruppoId, nomeProdotto){
+/* SER 09/11: lo sconto per prodotto si riconosce dal nome anche con spazi o maiuscole diverse
+   ("PASTA COLORANTE " con lo spazio in fondo) e anche dopo averlo rinominato (EPOSPLAST -> EPOPLAST):
+   per i prodotti di fabbrica vale anche il nome che avevano in fabbrica */
+/* prodotti di fabbrica che hanno cambiato nome: i codici sconto dati prima li chiamano col nome vecchio */
+var NOMI_VECCHI = { "EPOSPLAST": "EPOPLAST" };
+var NOMI_FABBRICA_CACHE = null;
+function nomiFabbrica(){
+  if(CLIENTE) return (FONTE && FONTE.nomiFabbrica) || (DATI && DATI.nomiFabbrica) || {};
+  if(!NOMI_FABBRICA_CACHE){ NOMI_FABBRICA_CACHE = {}; try{ scorriVoci(LISTINO_BASE, function(c){ if(c.uid && c.nome) NOMI_FABBRICA_CACHE[c.uid] = c.nome; }); }catch(e){} }
+  return NOMI_FABBRICA_CACHE;
+}
+/* per l'app dei clienti: solo i prodotti di fabbrica che SER ha rinominato */
+function nomiFabbricaCambiati(l){
+  var nf = nomiFabbrica(), out = {};
+  scorriVoci(l || listinoGenerale(), function(c){ var f = nf[c.uid]; if(f && chiaveNome(f) !== chiaveNome(c.nome)) out[c.uid] = f; });
+  return out;
+}
+function scontoDi(cli, gruppoId, nomeProdotto, uid){
   if(!cli) return 0;
-  if(nomeProdotto && cli.eccP && cli.eccP.length){
-    var pi = PRODOTTI_TUTTI.indexOf(nomeProdotto);
-    if(pi >= 0){
-      for(var k=0;k<cli.eccP.length;k++){ if(cli.eccP[k].idx===pi) return cli.eccP[k].val; }
+  if((nomeProdotto || uid) && cli.eccP && cli.eccP.length){
+    var cerca = [];
+    if(nomeProdotto) cerca.push(chiaveNome(nomeProdotto));
+    var nf = uid ? nomiFabbrica()[uid] : null; if(nf) cerca.push(chiaveNome(nf));
+    cerca.slice().forEach(function(n){ for(var vecchio in NOMI_VECCHI) if(chiaveNome(NOMI_VECCHI[vecchio]) === n) cerca.push(chiaveNome(vecchio)); });
+    for(var k=0;k<cli.eccP.length;k++){
+      var np = PRODOTTI_TUTTI[cli.eccP[k].idx];
+      if(np != null && cerca.indexOf(chiaveNome(np)) >= 0) return cli.eccP[k].val;
     }
   }
   var idx = LISTINO_BASE.gruppi.findIndex(function(g){ return g.id===gruppoId; });
@@ -1543,8 +1564,10 @@ var S = {
   mqRiv: typeof sel.mqRiv==="number" ? sel.mqRiv : 0,                                          // metri quadri del rivestimento
   realizza: (sel.realizza && typeof sel.realizza==="object") ? sel.realizza : {},             // sistema -> pavimento | rivestimento | entrambi
   rivDiverso: (sel.rivDiverso && typeof sel.rivDiverso==="object") ? sel.rivDiverso : {},     // sistema -> true se il rivestimento ha un altro colore
-  scarto: CLIENTE ? (FONTE && typeof FONTE.sfrido==="number" ? FONTE.sfrido : 0)
+  /* SER 09/11: il cliente vede lo sfrido e lo puo' cambiare; parte da quello impostato da SER */
+  scarto: CLIENTE ? ((sel.scartoMio && typeof sel.scarto==="number") ? sel.scarto : (FONTE && typeof FONTE.sfrido==="number" ? FONTE.sfrido : 0))
                   : (typeof sel.scarto==="number" ? sel.scarto : 0),
+  scartoMio: !!(CLIENTE && sel.scartoMio),
   gestione: false,
   aperta: null,          // uid della scheda prodotto aperta
   modifica: null,        // uid della riga con i campi di modifica aperti
@@ -1591,7 +1614,7 @@ var S = {
   if(mosso) try{ save(K.sel, S); }catch(e){}
 })();
 
-function salvaSel(){ save(K.sel, {gruppo:S.gruppo, variante:S.variante, mq:S.mq, mqRiv:S.mqRiv, realizza:S.realizza, rivDiverso:S.rivDiverso, scarto:S.scarto,
+function salvaSel(){ save(K.sel, {gruppo:S.gruppo, variante:S.variante, mq:S.mq, mqRiv:S.mqRiv, realizza:S.realizza, rivDiverso:S.rivDiverso, scarto:S.scarto, scartoMio:!!S.scartoMio,
   colore:S.colore, colsel:S.colsel, colq:S.colq, stencil:S.stencil, granulo:S.granulo, incluso:S.incluso, conf:S.conf, cons:S.cons, fin:S.fin, colgr:S.colgr, colpct:S.colpct, spessore:S.spessore, vista:S.vista, ricarico:S.ricarico,
   rif:S.rif, wa:S.wa, mail:S.mail, note:S.note, modo:S.modo, privacy:S.privacy||null}); }
 
@@ -3184,7 +3207,7 @@ function calcola(){
       if(onCat){
         if(mod.length && senza) senzaPrezzo += senza;
         lordo += costoTot;
-        var pcCat = scontoDi(cliente, g.id, c.nome);
+        var pcCat = scontoDi(cliente, g.id, c.nome, c.uid);
         if(costoTot > 0) aliquote[pcCat] = 1;
         scontoTot += costoTot * pcCat/100;
       }
@@ -3225,7 +3248,7 @@ function calcola(){
       if(costo===null) senzaPrezzo++;
       else {
         lordo += costo;
-        var pcRiga = scontoDi(cliente, g.id, c.nome);
+        var pcRiga = scontoDi(cliente, g.id, c.nome, c.uid);
         if(costo > 0) aliquote[pcRiga] = 1;
         scontoTot += costo * pcRiga/100;
       }
@@ -3240,6 +3263,7 @@ function calcola(){
   var misto = Object.keys(aliquote).length > 1;   // aliquote diverse sulle righe
   var netto = lordo - scontoEur;
   return { g:g, v:v, mq:mq, mqPav:mqPav, mqRiv:mqRiv, modo:modo, sc:sc, righe:righe, lordo:lordo, pct:pct, misto:misto, scontoEur:scontoEur,
+           aliquote: Object.keys(aliquote).map(Number).sort(function(a, b){ return a - b; }),
            netto:netto, nettoMq: mq>0 ? netto/mq : null, iva: conIva() ? netto*0.22 : 0, senzaPrezzo:senzaPrezzo };
 }
 
@@ -4218,11 +4242,32 @@ function chiHaLoSconto(){
   var c = clienteAttivo();
   return c ? (c.nome || "") : "";
 }
+/* tutti gli sconti del cliente: base, per sistema, per prodotto (SER 09/11: "elenca tutti i vari sconti") */
+function elencoSconti(cli){
+  if(!cli) return [];
+  var out = [T("sconto base") + " " + N(cli.base) + "%"];
+  (cli.ecc || []).forEach(function(e){
+    var gb = LISTINO_BASE.gruppi[e.idx]; if(!gb) return;
+    var g = (listinoGenerale().gruppi || []).find(function(x){ return x.id === gb.id; });
+    out.push(traduciTesto((g && g.nome) || gb.nome) + " " + N(e.val) + "%");
+  });
+  var nf = nomiFabbrica(), visti = {};
+  (cli.eccP || []).forEach(function(e){
+    var n = PRODOTTI_TUTTI[e.idx]; if(n == null) return;
+    /* se il prodotto e' stato rinominato si mostra il nome di adesso */
+    var adesso = null; scorriVoci(listinoGenerale(), function(c){ if(!adesso && (chiaveNome(c.nome) === chiaveNome(n) || (nf[c.uid] && chiaveNome(nf[c.uid]) === chiaveNome(n)))) adesso = c.nome; });
+    if(!adesso && NOMI_VECCHI[chiaveNome(n)]) adesso = NOMI_VECCHI[chiaveNome(n)];
+    var nome = String(adesso || n).trim(); if(visti[chiaveNome(nome)]) return; visti[chiaveNome(nome)] = 1;
+    out.push(nome + " " + N(e.val) + "%");
+  });
+  return out;
+}
 function etichettaSconto(r){
   var p = N(Math.round(r.pct*100)/100);
   var chi = chiHaLoSconto();
   var testa = chi ? ("Sconto di " + chi) : "Sconto riservato";
-  return r.misto ? (testa + " (media " + p + "%)") : (testa + " \u2212" + p + "%");
+  /* SER 09/11: con sconti diversi sulle righe si scrivono le percentuali vere, non la media */
+  return r.misto ? (testa + " (" + (r.aliquote || []).map(function(a){ return "\u2212" + N(a) + "%"; }).join(" \u00b7 ") + ")") : (testa + " \u2212" + p + "%");
 }
 
 /* L'IVA al 22% vale per i clienti italiani: chi usa l'app in un'altra lingua e' un cliente
@@ -4291,10 +4336,7 @@ function disegnaLock(){
     var chi = chiHaLoSconto();
     $("lockTitle").textContent = chi ? ("Sconto di " + chi + " attivo")
       : (CLIENTE ? "Sconto riservato attivo" : "Sconto da un codice non registrato");
-    var parti = ["sconto base "+N(cliente.base)+"%"];
-    if(cliente.ecc.length) parti.push(cliente.ecc.length+" sistem"+(cliente.ecc.length>1?"i":"a")+" a condizioni diverse");
-    if(cliente.eccP && cliente.eccP.length) parti.push(cliente.eccP.length+" prodott"+(cliente.eccP.length>1?"i":"o")+" a condizioni diverse");
-    $("lockDesc").textContent = parti.join(", ")
+    $("lockDesc").textContent = elencoSconti(cliente).join(" \u00b7 ")
       + (med ? ". Su questo preventivo pesa il "+N(Math.round(med*10)/10)+"%." : ".")
       + (cliente.scadenza ? " Valido fino al "+cliente.scadenza.toLocaleDateString("it-IT")+"." : "");
     $("codeInputRow").hidden = true;
@@ -4333,7 +4375,7 @@ function disegna(){
       + (cliListino ? " Vale per tutti i clienti, non solo per questo." : "");
   }
   $("vuoto").hidden = !!varianteCorrente().voci.length;
-  $("sfridoBox").hidden = !S.gestione;
+  $("sfridoBox").hidden = !(S.gestione || CLIENTE);
   $("notaSfrido").hidden = !S.gestione;
   return r;
 }
@@ -4403,7 +4445,7 @@ $("rivStessoColore").addEventListener("change", function(e){
   if(e.target.checked) delete S.rivDiverso[g.id]; else S.rivDiverso[g.id] = true;
   salvaSel(); disegna();
 });
-$("scarto").addEventListener("input", function(e){ S.scarto = Number(e.target.value); salvaSel(); disegna(); });
+$("scarto").addEventListener("input", function(e){ S.scarto = Number(e.target.value); if(CLIENTE) S.scartoMio = true; salvaSel(); disegna(); });
 $("mq").value = S.mq; $("scarto").value = S.scarto;
 /* il cliente registrato in gestione trova nome, WhatsApp ed email gia' scritti
    nel riepilogo (dal link personale o dall'app generata per lui); se li cambia, restano i suoi */
@@ -5448,7 +5490,7 @@ function costruisciApp(cli){
     for(var u in tuttiAll) if(usati[u]) allegati[u] = tuttiAll[u];
     var dati = { listino:perClienti, allegati:allegati, avvisi:avvisi,
                  avvisiUrl: load(K.avUrl, ""), baseUrl: load(K.base, ""), azienda: completaAzienda(load(K.azienda, null)),
-                 sfrido:Number(S.scarto)||0, prodExtra:PRODOTTI_EXTRA.slice(), quando:new Date().toISOString() };
+                 sfrido:Number(S.scarto)||0, prodExtra:PRODOTTI_EXTRA.slice(), nomiFabbrica: nomiFabbricaCambiati(perClienti), quando:new Date().toISOString() };
     if(cli) dati.cliente = {nome:cli.nome||"", code:cli.code||"", tel:cli.tel||"", mail:cli.mail||""};
     dati.rev = firmaDati({listino:dati.listino, allegati:dati.allegati, sfrido:dati.sfrido});
     var json = JSON.stringify(dati).replace(/</g, "\\u003c");
@@ -5854,7 +5896,7 @@ function vociPreventivo(r){
     if(!x.on) return;
     if(x.v.catalogo){
       if(!x.mod.length) return;
-      var pcCat = scontoDi(cliente, r.g.id, x.v.nome);
+      var pcCat = scontoDi(cliente, r.g.id, x.v.nome, x.v.uid);
       out.push({nome:x.v.nome, extra:"", avviso:x.v.avviso||"", det:x.mod.length+(x.mod.length===1?" modello scelto":" modelli scelti"), costo:x.costo,
                 sconto:pcCat, netto: x.costo===null ? null : x.costo*(1-pcCat/100),
                 sotto:x.mod.map(function(m){
@@ -5881,7 +5923,7 @@ function vociPreventivo(r){
                + " = " + (z.costo===null ? "prezzo da definire" : E(z.costo));
         })
       : [];
-    var pcRiga = scontoDi(cliente, r.g.id, x.v.nome);
+    var pcRiga = scontoDi(cliente, r.g.id, x.v.nome, x.v.uid);
     out.push({
       sconto: pcRiga,
       netto: x.costo===null ? null : x.costo*(1-pcRiga/100),
@@ -5984,7 +6026,7 @@ function testoRiepilogo(){
   L.push("");
   L.push("Materiale a listino: "+E(r.lordo));
   if(cliente){
-    L.push((r.misto ? "Sconto riservato (media "+N(Math.round(r.pct*100)/100)+"%): -"
+    L.push((r.misto ? "Sconto riservato (" + (r.aliquote || []).map(function(a){ return "-" + N(a) + "%"; }).join(" \u00b7 ") + "): -"
                     : "Sconto riservato -"+N(Math.round(r.pct*100)/100)+"%: -")+E(r.scontoEur));
   }
   L.push("Imponibile: "+E(r.netto));
@@ -6433,7 +6475,7 @@ function telaOrdine(){
       rett(px, lb, pw, hl, C.okSoft, C.ok, 4);
       if(!soloMisura){ g.fillStyle = C.ok; g.beginPath(); g.arc(px + 16, lb + 18, 4, 0, 6.3); g.fill(); }
       font("600", 13); testo(chiHaLoSconto() ? T("Sconto di") + " " + chiHaLoSconto() + " " + T("attivo") : T("Sconto riservato attivo"), px + 28, lb + 22, {col:C.ok, it:true});
-      font("400", 11.5); testo(T("sconto base") + " " + N(cliente.base) + "%" + (cliente.code ? " \u00b7 " + T("codice") + " " + cliente.code : "") + (cliente.scadenza ? " \u00b7 " + T("valido fino al") + " " + cliente.scadenza.toLocaleDateString("it-IT") : ""), px + 28, lb + 41, {col:C.fg, it:true});
+      font("400", 11.5); var elS = elencoSconti(cliente); testo((elS.length > 4 ? elS.slice(0, 4).join(" \u00b7 ") + " \u2026" : elS.join(" \u00b7 ")) + (cliente.code ? " \u00b7 " + T("codice") + " " + cliente.code : "") + (cliente.scadenza ? " \u00b7 " + T("valido fino al") + " " + cliente.scadenza.toLocaleDateString("it-IT") : ""), px + 28, lb + 41, {col:C.fg, it:true});
       y = lb + hl + 12;
     }
     /* sistema */
@@ -7924,7 +7966,7 @@ function applicaListino(p){
   if(!p || !p.listino || !Array.isArray(p.listino.gruppi) || !p.listino.gruppi.length) return false;
   listino = normalizza(p.listino);
   ALLEGATI = p.allegati || null;
-  if(typeof p.sfrido === "number"){ S.scarto = p.sfrido; $("scarto").value = p.sfrido; }
+  if(typeof p.sfrido === "number" && !S.scartoMio){ S.scarto = p.sfrido; $("scarto").value = p.sfrido; }
   if(p.azienda && (p.azienda.wa || p.azienda.mail)) AZIENDA = p.azienda;
   if(!listino.gruppi.some(function(g){ return g.id === S.gruppo; })) S.gruppo = listino.gruppi[0].id;
   if(!gruppoCorrente().varianti.some(function(v){ return v.id === S.variante; })) S.variante = gruppoCorrente().varianti[0].id;
@@ -8079,10 +8121,40 @@ $("avFile").addEventListener("change", function(e){
   }).catch(function(err){ m.className="msg err"; m.textContent="Non riesco a leggere un'immagine: "+err.message; });
   e.target.value = "";
 });
+/* SER 09/11: in Comunicazioni si sceglie a chi mandare l'avviso: a tutti (come prima), ai clienti registrati o a un cliente */
+(function(){ var sd = document.getElementById("avDest"); if(sd) sd.addEventListener("change", function(){ var b = $("btnAvSalva"); if(b) b.textContent = sd.value ? "Invia avviso" : "Pubblica avviso"; }); })();
+function disegnaAvDest(){
+  var sel = $("avDest"); if(!sel) return;
+  var cur = sel.value;
+  var el = clienti.slice().sort(function(a, b){ return String(a.nome||"").localeCompare(String(b.nome||""), "it"); });
+  sel.innerHTML = '<option value="">Tutti (anche chi usa l\u2019app senza link personale)</option><option value="*">Tutti i clienti registrati (con il link personale)</option>'
+    + (el.length ? '<optgroup label="Solo a un cliente">' + el.map(function(c){ return '<option value="' + esc(c.id) + '">' + esc(c.nome || "(senza nome)") + '</option>'; }).join("") + '</optgroup>' : '');
+  sel.value = (cur === "" || cur === "*" || el.some(function(c){ return c.id === cur; })) ? cur : "";
+}
 $("btnAvSalva").addEventListener("click", function(){
   var m = $("avMsg");
   var t = $("avTitolo").value.trim();
   if(!t){ m.className="msg err"; m.textContent="Serve almeno il titolo."; return; }
+  var dest = $("avDest") ? $("avDest").value : "";
+  if(dest){
+    if(inModifica){ m.className = "msg err"; m.textContent = "Stai modificando un avviso per tutti: premi Annulla modifica, poi scegli a chi mandarne uno nuovo."; return; }
+    var cd = dest === "*" ? null : clienti.find(function(x){ return x.id === dest; });
+    var bt = $("btnAvSalva"); bt.disabled = true; m.className = "msg"; m.textContent = "Mando l\u2019avviso\u2026";
+    chiamaServizioAvvisi({azione:"avvisoPut", per:dest, avviso:{titolo:t, testo:$("avTesto").value, foto:fotoBozza.slice(0, 4)}}, function(j, err){
+      bt.disabled = false;
+      if(!j){ m.className = "msg err"; m.textContent = err; return; }
+      fotoBozza = []; $("avTitolo").value = ""; $("avTesto").value = ""; disegnaBozzaFoto();
+      m.className = "msg ok";
+      if(dest === "*") m.textContent = "Avviso mandato a tutti i clienti registrati: lo vedono nell\u2019app alla prossima apertura.";
+      else {
+        m.innerHTML = "Avviso mandato a " + esc(cd ? cd.nome || "questo cliente" : "questo cliente") + ": lo vede solo lui, nell\u2019app alla prossima apertura."
+          + (cd && cd.tel ? ' <button class="btn sec small" type="button" id="btnAvWaCli" style="margin-left:6px">Avvisalo anche su WhatsApp</button>' : '');
+        var bw = document.getElementById("btnAvWaCli");
+        if(bw) bw.addEventListener("click", function(){ apriWhatsApp(numeroWaCliente(cd.tel) || cd.tel, "Ciao" + (cd.nome ? " " + cd.nome : "") + ", ti abbiamo mandato un avviso nell\u2019app dei preventivi: aprila e tocca Avvisi.\n" + (AZIENDA.nome || "Design Systems")); });
+      }
+    });
+    return;
+  }
   if(inModifica){
     var a = avvisi.find(function(x){ return x.id===inModifica; });
     if(a){ a.titolo=t; a.testo=$("avTesto").value; a.foto=fotoBozza.slice(); }
@@ -8102,6 +8174,7 @@ $("btnAvAnnulla").addEventListener("click", function(){
   $("btnAvAnnulla").hidden=true; disegnaBozzaFoto();
 });
 function disegnaCom(){
+  disegnaAvDest();
   $("contaCom").textContent = "("+avvisi.length+")";
   $("elencoCom").innerHTML = avvisi.length
     ? avvisi.map(function(a){
@@ -8251,7 +8324,8 @@ function datiPerSito(){
   var tutti = attTutti(), allegati = {};
   for(var u in tutti) if(usati[u]) allegati[u] = tutti[u];
   return { listino:perClienti, allegati:allegati, sfrido:Number(S.scarto)||0, quando:new Date().toISOString(),
-           azienda: completaAzienda(load(K.azienda, null)), attivaUrl: (load(K.att, null)||{}).url || "" };
+           azienda: completaAzienda(load(K.azienda, null)), attivaUrl: (load(K.att, null)||{}).url || "",
+           prodExtra: PRODOTTI_EXTRA.slice(), nomiFabbrica: nomiFabbricaCambiati(perClienti) };   /* SER 09/11: senza, gli sconti per prodotto dei prodotti aggiunti non valevano nell'app online */
 }
 $("btnDati").addEventListener("click", function(){
   var m = $("sitoMsg");
