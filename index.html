@@ -821,7 +821,10 @@ var TEMPLATE_B64 = ""; /*__TEMPLATE__*/
 var ONLINE_B64 = ""; /*__ONLINE__*/      // l'index.html per il sito, pronto da pubblicare
 var GH_PRECOMPILATO = null; /*__GHPRE__*/   // {user, token} messi da Claude in una copia locale, una volta sola
 var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attivazioni, idem
-var APP_REV = "20261108065544";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
+var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
+/*__QRLIB__*/
+var APP_REV = "20261108154902";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -7162,33 +7165,151 @@ function apriPassword(){
   var div = document.createElement("div");
   div.className = "card"; div.id = "pwPanel";
   div.innerHTML = '<h2>Area gestione</h2>'
-    + '<p style="font-size:13.5px;margin:0 0 10px">Qui dentro cambi prezzi, consumi, rese, confezioni, nomi dei prodotti e sconti, e generi l\u2019app da mandare ai clienti.</p>'
-    + '<div class="codein"><input id="pwIn" type="password" placeholder="password" autocomplete="off" style="text-transform:none;letter-spacing:normal">'
+    + '<p style="font-size:13.5px;margin:0 0 10px">Qui dentro cambi prezzi, consumi, rese, confezioni, nomi dei prodotti e sconti, e generi l’app da mandare ai clienti.</p>'
+    + '<div class="codein"><input id="pwIn" type="password" placeholder="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="text-transform:none;letter-spacing:normal">'
+    + '<button class="btn sec" type="button" id="pwVedi">Mostra</button>'
     + '<button class="btn" id="pwGo">Entra</button></div>'
-    + '<p class="msg" id="pwInMsg"></p>';
+    + '<p class="msg" id="pwInMsg"></p>'
+    + '<p style="margin:6px 0 0;font-size:13px"><a href="#" id="pwDimenticata">Password dimenticata?</a></p>'
+    + '<div id="pwAiuto" hidden></div>';
   mostraVista("prev");
   $("vPrev").insertBefore(div, $("vPrev").firstChild);
   div.scrollIntoView({block:"center", behavior:"smooth"});
   $("pwIn").focus();
+  $("pwVedi").addEventListener("click", function(){ var i = $("pwIn"), v = i.type === "password"; i.type = v ? "text" : "password"; this.textContent = v ? "Nascondi" : "Mostra"; i.focus(); });
   $("pwGo").addEventListener("click", function(){
-    if($("pwIn").value === pw){
-      S.gestione = true;
-      $("btnGest").setAttribute("aria-pressed","true");
-      $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false;
-      div.remove(); disegna(); disegnaGenSconti(); disegnaSpazio(); disegnaCom();
-      if(typeof disegnaRichieste === "function") disegnaRichieste();
-      if(typeof avviaControlloOrdini === "function") avviaControlloOrdini();
-      setTimeout(function(){ var n = propagaSchede(); if(n){ disegna(); var mm = $("copyMsg"); mm.className = "msg ok"; mm.textContent = "Schede tecniche completate: " + n + " prodotti hanno preso la scheda dagli omonimi."; } }, 1500);
-    } else { $("pwInMsg").className="msg err"; $("pwInMsg").textContent="Password sbagliata."; }
+    if(pwUguale($("pwIn").value, pw)){ entraInGestione(); return; }
+    /* SER 08/11: il codice di collegamento (la parola d'ordine del servizio) apre sempre la gestione */
+    var scritto = $("pwIn").value.replace(/\s+/g, ""), cfg = syncCfg();
+    if(cfg && scritto && scritto === cfg.chiave){ entraInGestione(); return; }
+    var m = $("pwInMsg"); m.className = "msg err";
+    if(!cfg && scritto.length >= 12){
+      m.className = "msg"; m.textContent = "Controllo se \u00e8 il codice di collegamento\u2026";
+      collegaDispositivo(scritto, function(ok){
+        if(ok){ m.className = "msg ok"; m.textContent = "Codice di collegamento giusto: collego questo dispositivo e riapro la gestione\u2026"; try{ sessionStorage.setItem("pavpro.entra", "1"); }catch(e){} }
+        else { m.className = "msg err"; m.textContent = "Password sbagliata."; pwMostraCollega("Questo dispositivo non \u00e8 ancora collegato alla memoria condivisa: qui vale ancora la password iniziale, non quella che hai scelto sul Mac. Collegalo e varr\u00e0 la stessa password dappertutto."); }
+      });
+      return;
+    }
+    if(!cfg){
+      m.textContent = "Password sbagliata.";
+      pwMostraCollega("Questo dispositivo non è ancora collegato alla memoria condivisa: qui vale ancora la password iniziale, non quella che hai scelto sul Mac. Collegalo e varrà la stessa password dappertutto.");
+      return;
+    }
+    m.textContent = "Password sbagliata. Controllo se è stata cambiata da un altro dispositivo…";
+    pwAggiornaDalServizio(function(esito){
+      if(esito === "ricarico") m.textContent = "La memoria è cambiata su un altro dispositivo: aggiorno l’app, poi riprova la password.";
+      else m.textContent = "Password sbagliata." + (esito === "irraggiungibile" ? " (Il servizio ora non risponde: qui vale la password salvata l’ultima volta su questo dispositivo.)" : "");
+    });
   });
   $("pwIn").addEventListener("keydown", function(e){ if(e.key==="Enter") $("pwGo").click(); });
+  $("pwDimenticata").addEventListener("click", function(e){ e.preventDefault(); pwDimenticata(); });
+}
+/* SER 08/11: la password si confronta senza badare a spazi prima/dopo e a maiuscole (le tastiere dei telefoni li aggiungono da sole) */
+function pwUguale(a, b){ return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase(); }
+function entraInGestione(){
+  var div = document.getElementById("pwPanel");
+  S.gestione = true;
+  $("btnGest").setAttribute("aria-pressed","true");
+  $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false;
+  if(div) div.remove();
+  disegna(); disegnaGenSconti(); disegnaSpazio(); disegnaCom();
+  if(typeof disegnaRichieste === "function") disegnaRichieste();
+  if(typeof avviaControlloOrdini === "function") avviaControlloOrdini();
+  setTimeout(function(){ var n = propagaSchede(); if(n){ disegna(); var mm = $("copyMsg"); mm.className = "msg ok"; mm.textContent = "Schede tecniche completate: " + n + " prodotti hanno preso la scheda dagli omonimi."; } }, 1500);
+}
+/* chiede al servizio se c'e' una memoria piu' nuova (es. password cambiata sul Mac): se si', la prende e ricarica */
+function pwAggiornaDalServizio(poi){
+  if(!SYNC.attiva){ poi(SYNC.errore ? "irraggiungibile" : "uguale"); return; }
+  syncChiama({azione:"statoQuando"}, function(j){
+    if(!j || !j.ok){ poi("irraggiungibile"); return; }
+    if(j.rev && j.rev > APP_REV){ copiaVecchia(j.rev); poi("uguale"); return; }
+    if(j.quando && j.quando !== SYNC.quando && !SYNC.sporco && !SYNC.inCorso){
+      SYNC.inCorso = true; poi("ricarico");
+      syncChiama({azione:"statoGet"}, function(j2){ if(j2 && j2.ok && j2.stato) syncApplica(j2.stato, syncRicarica); else SYNC.inCorso = false; });
+      return;
+    }
+    poi("uguale");
+  });
+}
+/* collegare un telefono (o un computer) alla memoria condivisa: basta il codice di collegamento, cioe' la parola d'ordine del servizio */
+function pwMostraCollega(perche){
+  var box = $("pwAiuto"); box.hidden = false;
+  box.innerHTML = '<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line-strong)">'
+    + '<p style="font-size:13.5px;margin:0 0 8px">' + esc(perche) + '</p>'
+    + '<p style="font-size:13px;margin:0 0 8px;color:var(--muted)">Il codice di collegamento lo trovi sul Mac: Gestione → scheda Comunicazioni → «Collega un telefono». Copialo sul Mac e incollalo qui (con lo stesso ID Apple si incolla da un dispositivo all’altro), oppure scrivilo.</p>'
+    + '<div class="codein"><input id="colCodice" type="text" placeholder="codice di collegamento" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="text-transform:none;letter-spacing:normal">'
+    + '<button class="btn" type="button" id="colGo">Collega</button></div>'
+    + '<p class="msg" id="colMsg"></p></div>';
+  $("colGo").addEventListener("click", function(){
+    var m = $("colMsg"), c = collegaCodice($("colCodice").value);
+    if(!c){ m.className = "msg err"; m.textContent = "Scrivi o incolla il codice."; return; }
+    m.className = "msg"; m.textContent = "Controllo il codice…";
+    collegaDispositivo(c, function(ok, perche){
+      if(ok){ m.className = "msg ok"; m.textContent = "Collegato. Prendo la memoria condivisa e riapro l’app: poi entra con la tua password."; }
+      else { m.className = "msg err"; m.textContent = perche; }
+    });
+  });
+}
+/* accetta il codice da solo o il link intero (…#collega=codice) */
+function collegaCodice(t){
+  t = String(t || "").trim(); var m = t.match(/[#&]collega=([^&\s]+)/);
+  if(m){ try{ t = decodeURIComponent(m[1]); }catch(e){ t = m[1]; } }
+  return t.replace(/\s+/g, "");
+}
+function collegaDispositivo(chiave, poi){
+  var a = attImpostazioni(), url = /^https?:\/\//i.test(a.url || "") ? a.url : ATT_URL_BASE;
+  fetch(url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:chiave, azione:"statoQuando"})})
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j || !j.ok){ poi(false, (j && j.motivo === "chiave") ? "Il codice non è giusto: ricopialo dal Mac." : "Il servizio ha risposto in modo strano: riprova fra poco."); return; }
+      a.url = url; a.chiave = chiave; saveVero(K.att, a);
+      poi(true);
+      try{ saveVero(SYNC_K, {quando:null, sporco:false}); sessionStorage.removeItem("pavpro.sync.ricaricato"); }catch(e){}
+      syncChiama({azione:"statoGet"}, function(j2){
+        if(j2 && j2.ok && j2.stato) syncApplica(j2.stato, syncRicarica);
+        else setTimeout(function(){ location.reload(); }, 800);
+      });
+    }).catch(function(){ poi(false, "Il servizio non risponde: controlla la connessione e riprova."); });
+}
+/* Password dimenticata: si cambia da un dispositivo collegato al servizio (il Mac lo e' sempre) */
+function pwDimenticata(){
+  var box = $("pwAiuto"), m = $("pwInMsg");
+  if(!syncCfg()){ m.className = "msg"; m.textContent = ""; pwMostraCollega("Per scegliere una password nuova questo dispositivo deve essere collegato alla memoria condivisa. Collegalo con il codice, poi torna su «Password dimenticata?». Se sei sul Mac nella copia di Documenti → PavimentiPro, è già collegato."); return; }
+  if(SYNC.errore === "copia vecchia: non salva"){ m.className = "msg err"; m.textContent = "Questa è una copia vecchia del gestionale: apri quella aggiornata."; return; }
+  if(!SYNC.pronto || SYNC.inCorso){ m.className = "msg"; m.textContent = "Un attimo: sto prendendo la memoria dal servizio. Riprova fra qualche secondo."; return; }
+  m.className = "msg"; m.textContent = "Controllo che questo dispositivo sia collegato…";
+  syncChiama({azione:"statoQuando"}, function(j){
+    if(!j || !j.ok){ m.className = "msg err"; m.textContent = (j && j.motivo === "chiave") ? "Il collegamento di questo dispositivo non vale più: usa il Mac." : "Il servizio non risponde: riprova fra poco (serve internet)."; return; }
+    if(j.rev && j.rev > APP_REV){ copiaVecchia(j.rev); m.className = "msg err"; m.textContent = "Questa è una copia vecchia del gestionale: apri quella aggiornata."; return; }
+    if(j.quando && j.quando !== SYNC.quando && !SYNC.sporco){
+      m.textContent = "Arrivano modifiche da un altro dispositivo: aggiorno l’app, poi premi di nuovo «Password dimenticata?».";
+      SYNC.inCorso = true; syncChiama({azione:"statoGet"}, function(j2){ if(j2 && j2.ok && j2.stato) syncApplica(j2.stato, syncRicarica); else SYNC.inCorso = false; });
+      return;
+    }
+    m.textContent = ""; box.hidden = false;
+    box.innerHTML = '<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line-strong)">'
+      + '<p style="font-size:13.5px;margin:0 0 8px">Questo dispositivo è collegato alla memoria condivisa: scegli la password nuova. Varrà su tutti i dispositivi collegati (Mac, iPhone, iPad).</p>'
+      + '<div class="grid2"><div><label class="l" for="pwN1">Password nuova</label><input id="pwN1" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="almeno 4 caratteri"></div>'
+      + '<div><label class="l" for="pwN2">Ripetila</label><input id="pwN2" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>'
+      + '<div class="btnrow" style="margin-top:8px"><button class="btn" type="button" id="pwNGo">Salva ed entra</button></div>'
+      + '<p class="msg" id="pwNMsg"></p></div>';
+    $("pwNGo").addEventListener("click", function(){
+      var v1 = $("pwN1").value.trim(), v2 = $("pwN2").value.trim(), mm = $("pwNMsg");
+      if(v1.length < 4){ mm.className = "msg err"; mm.textContent = "Serve almeno 4 caratteri."; return; }
+      if(v1 !== v2){ mm.className = "msg err"; mm.textContent = "Le due password non sono uguali."; return; }
+      pw = v1; save(K.pw, pw);
+      entraInGestione();
+      var cm = $("copyMsg"); if(cm){ cm.className = "msg ok"; cm.textContent = "Password nuova salvata: vale su tutti i dispositivi collegati."; }
+    });
+    $("pwN1").focus();
+  });
 }
 
 $("btnPw").addEventListener("click", function(){
   var v = $("pwNew").value.trim(), m = $("pwMsg");
   if(v.length < 4){ m.className="msg err"; m.textContent="Serve almeno 4 caratteri."; return; }
   pw = v; save(K.pw, pw); $("pwNew").value="";
-  m.className="msg ok"; m.textContent="Password cambiata su questo dispositivo.";
+  m.className="msg ok"; m.textContent = SYNC.attiva ? "Password cambiata: vale su tutti i dispositivi collegati alla memoria condivisa." : "Password cambiata su questo dispositivo.";
 });
 
 /* ---- generatore codici ---- */
@@ -8235,6 +8356,33 @@ function attImpostazioni(){
   $(id).value = id === "attUrl" ? (a.url || "") : (a.chiave || "");
   $(id).addEventListener("input", function(){ var a2 = attImpostazioni(); a2.url = $("attUrl").value.trim(); a2.chiave = $("attChiave").value.trim(); save(K.att, a2); });
 });
+/* SER 08/11: "Collega un telefono": il codice (e il QR) per collegare un altro dispositivo alla memoria condivisa */
+function linkCollegaTel(chiave){
+  if(!CARTELLA_TEL) return "";
+  var base = linkSitoGh() || "https://designsystems-app.github.io/preventivi/";
+  return base.replace(/\/?$/, "/") + CARTELLA_TEL + "/index.html#collega=" + encodeURIComponent(chiave);
+}
+$("btnCollegaTel").addEventListener("click", function(){
+  var box = $("collegaTelBox");
+  if(!box.hidden){ box.hidden = true; box.innerHTML = ""; return; }
+  var a = attImpostazioni(); box.hidden = false;
+  if(!/^https?:\/\//i.test(a.url || "") || !a.chiave){ box.innerHTML = '<p class="msg err">Prima imposta l’indirizzo e la parola d’ordine del servizio qui sopra.</p>'; return; }
+  var link = linkCollegaTel(a.chiave), qr = "";
+  if(link && typeof qrcode === "function"){ try{ var q = qrcode(0, "M"); q.addData(link); q.make(); qr = q.createSvgTag(4, 4); }catch(e){ qr = ""; } }
+  box.innerHTML = '<div style="margin-top:8px;padding:12px;border:1px solid var(--line-strong);border-radius:10px">'
+    + '<p style="font-size:13.5px;margin:0 0 8px">Sul telefono apri il gestionale (l’icona «Gestionale»), premi Gestione e incolla questo <b>codice di collegamento</b> nel campo della password, poi Entra. Il telefono si collega, prende la memoria condivisa e da lì in poi vale anche la tua password del Mac. Il codice apre sempre la gestione: tienilo per te.</p>'
+    + '<div class="codein"><input id="colTelCodice" type="text" readonly value="' + esc(a.chiave) + '" style="font-family:ui-monospace,Menlo,monospace;text-transform:none;letter-spacing:normal">'
+    + '<button class="btn sec" type="button" id="colTelCopia">Copia il codice</button></div>'
+    + '<p class="msg" id="colTelMsg"></p>'
+    + (qr ? '<p style="font-size:13px;margin:10px 0 6px">Oppure inquadra il QR con la fotocamera: si apre il gestionale in Safari, già collegato.</p><div style="background:#fff;display:inline-block;padding:6px;border-radius:8px;width:200px;max-width:100%">' + qr.replace("<svg ", '<svg style="width:100%;height:auto;display:block" ') + '</div>' : '')
+    + '<p class="note" style="margin-top:8px">Il codice è la parola d’ordine del servizio: non mandarlo ai clienti né ad altri.</p></div>';
+  $("colTelCopia").addEventListener("click", function(){
+    var m = $("colTelMsg"), t = $("colTelCodice").value;
+    var fatto = function(){ m.className = "msg ok"; m.textContent = "Codice copiato: sul telefono (stesso ID Apple) tieni premuto nel campo e scegli Incolla."; };
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(fatto).catch(function(){ $("colTelCodice").select(); m.className = "msg"; m.textContent = "Selezionato: premi Cmd+C per copiarlo."; });
+    else { $("colTelCodice").select(); m.className = "msg"; m.textContent = "Selezionato: premi Cmd+C per copiarlo."; }
+  });
+});
 /* gli ordini ricevuti, dal servizio */
 var ORDINI_FILTRO = null;      // {id, nome} del cliente di cui vedere gli ordini, o null per tutti
 function disegnaOrdiniRicevuti(filtro){
@@ -8696,30 +8844,51 @@ function assistenteVoce(){
   if(!SR){ b.hidden = true; assistenteLinguaRiga(); return; }
   b.hidden = false; assistenteLinguaRiga();
   if(b.__pronto) return; b.__pronto = true;
+  /* SER 08/11: sull'iPhone il secondo ascolto a volte resta appeso (nessun evento): ogni tocco parte pulito,
+     un controllo a tempo chiude l'ascolto bloccato e, se il microfono dell'app non risponde, si apre la tastiera
+     (che ha il suo microfono). Le domande e le risposte di prima restano. */
+  var chiudi = function(r){ if(!r) return; r.onresult = r.onerror = r.onend = r.onstart = r.onaudiostart = null; try{ r.abort(); }catch(e){} };
+  var tastiera = function(testo){ var m = $("assistenteMsg"), inp = $("assistenteIn"); m.className = "msg err"; m.textContent = T(testo); try{ inp.focus(); }catch(e){} };
   b.addEventListener("click", function(){
-    if(ASS.rec){ try{ ASS.rec.stop(); }catch(e){} return; }
-    var rec = new SR(); ASS.rec = rec;
-    rec.lang = VOCE_LINGUA[LINGUA] || "it-IT"; rec.interimResults = true; rec.maxAlternatives = 1;
-    var base = $("assistenteIn").value.trim(), partito = Date.now(), sentito = false, errore = null, m = $("assistenteMsg");
-    b.textContent = "\u25cf " + T("Ascolto…"); b.classList.add("attivo");
-    m.className = "msg"; m.textContent = T("Ascolto…");
-    rec.onresult = function(e){
-      sentito = true;
-      var t = ""; for(var i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      $("assistenteIn").value = (base ? base + " " : "") + t;
-    };
-    rec.onerror = function(e){ errore = (e && e.error) || "errore"; };
-    rec.onend = function(){
-      ASS.rec = null; b.textContent = "🎤 " + T("Parla"); b.classList.remove("attivo");
+    var cur = ASS.rec;
+    if(cur && cur.__sentito){ try{ cur.stop(); }catch(e){} setTimeout(function(){ if(cur.__concludi) cur.__concludi(); }, 1500); return; }   // ha gia' sentito: il tocco chiude e manda
+    if(cur){ if(cur.__chiudi) cur.__chiudi(); ASS.rec = null; }       // ascolto appeso dal tocco di prima: si butta e si riparte
+    var rec = new SR(); ASS.rec = rec; rec.__sentito = false;
+    rec.lang = VOCE_LINGUA[LINGUA] || "it-IT"; rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
+    var base = $("assistenteIn").value.trim(), partito = Date.now(), ultimo = 0, partitoDavvero = false, errore = null, finito = false, timer = null, m = $("assistenteMsg");
+    var ripristina = function(){ finito = true; clearTimeout(timer); if(ASS.rec === rec) ASS.rec = null; b.textContent = "🎤 " + T("Parla"); b.classList.remove("attivo"); };
+    rec.__chiudi = function(){ if(finito) return; ripristina(); chiudi(rec); };
+    /* fine dell'ascolto (dall'evento del telefono, o dal controllo a tempo se l'evento non arriva) */
+    var concludi = rec.__concludi = function(){
+      if(finito) return; ripristina(); chiudi(rec);
       var testo = $("assistenteIn").value.trim();
-      if(sentito && testo && testo !== base){ m.textContent = ""; assistenteChiedi(); return; }
+      if(rec.__sentito && testo && testo !== base){ m.textContent = ""; assistenteChiedi(); return; }
       if(errore === "language-not-supported"){ m.className = "msg err"; m.textContent = T("Questo telefono non riconosce la voce in questa lingua: scrivi la domanda, oppure usa il microfono della tastiera."); return; }
       if(errore === "not-allowed" || errore === "service-not-allowed"){ m.className = "msg err"; m.textContent = T("Il microfono non è permesso: scrivi la domanda, oppure usa il microfono della tastiera."); return; }
-      if(!sentito && Date.now() - partito < 1500){ /* non e' partito proprio (succede nell'app sulla schermata Home di iPhone): resta il microfono della tastiera */
-        b.hidden = true; assistenteLinguaRiga(); m.className = "msg err"; m.textContent = T("Il microfono non è permesso: scrivi la domanda, oppure usa il microfono della tastiera."); return; }
-      m.className = "msg err"; m.textContent = T("Non ho sentito: riprova, oppure scrivi la domanda.");
+      if(!partitoDavvero && !ASS.voceOk && Date.now() - partito < 1500){ /* non e' mai partito (succede nell'app sulla schermata Home di iPhone): resta il microfono della tastiera */
+        b.hidden = true; assistenteLinguaRiga(); tastiera("Il microfono non è permesso: scrivi la domanda, oppure usa il microfono della tastiera."); return; }
+      tastiera("Non ho sentito: riprova, oppure scrivi la domanda.");
     };
-    try{ rec.start(); }catch(e){ ASS.rec = null; b.hidden = true; assistenteLinguaRiga(); m.className = "msg err"; m.textContent = T("Il microfono non è permesso: scrivi la domanda, oppure usa il microfono della tastiera."); }
+    b.textContent = "● " + T("Ascolto…"); b.classList.add("attivo");
+    m.className = "msg"; m.textContent = T("Ascolto…");
+    /* controllo a tempo: non partito in 4 s, niente sentito in 12 s, o 4 s di silenzio dopo aver parlato senza che il telefono chiuda */
+    (function guardia(){
+      timer = setTimeout(function(){
+        if(finito) return;
+        var ora = Date.now();
+        if((rec.__sentito && ora - ultimo > 4000) || (!rec.__sentito && ((!partitoDavvero && ora - partito > 4000) || ora - partito > 12000))){ concludi(); return; }
+        guardia();
+      }, 2000);
+    })();
+    rec.onstart = rec.onaudiostart = function(){ partitoDavvero = true; };
+    rec.onresult = function(e){
+      rec.__sentito = true; partitoDavvero = true; ASS.voceOk = true; ultimo = Date.now();
+      var t = ""; for(var k = 0; k < e.results.length; k++) t += e.results[k][0].transcript;
+      $("assistenteIn").value = (base ? base + " " : "") + t.trim();
+    };
+    rec.onerror = function(e){ errore = (e && e.error) || "errore"; };
+    rec.onend = function(){ concludi(); };
+    try{ rec.start(); }catch(e){ errore = ASS.voceOk ? "errore" : "not-allowed"; partitoDavvero = !!ASS.voceOk; concludi(); }
   });
 }
 function assistenteBolla(cls, testo){
@@ -9468,6 +9637,18 @@ if(CLIENTE){
   archivioCarica(function(){ disegnaMieiOrdini(); });
 }
 if(!CLIENTE){
+  (function(){
+    if(!/[#&]collega=/.test(location.hash || "")) return;
+    var c = collegaCodice(location.hash);
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){ location.hash = ""; }
+    if(!c) return;
+    var a = attImpostazioni(); if(a.chiave === c && /^https?:\/\//i.test(a.url || "")) return;
+    a.url = /^https?:\/\//i.test(a.url || "") ? a.url : ATT_URL_BASE; a.chiave = c; saveVero(K.att, a);
+    saveVero(SYNC_K, {quando:null, sporco:false});
+    try{ sessionStorage.removeItem("pavpro.sync.ricaricato"); }catch(e){}
+  })();
+}
+if(!CLIENTE){
   archivioCarica(function(){ syncAvvio(function(){
     agganciaSchedeDiFabbrica();
     var tzVia = togliGhiainoTerrazzo();
@@ -9482,6 +9663,7 @@ if(!CLIENTE){
     tz = tz || tz4;
     disegnaSpazio();
     disegna();                 // le foto dei sistemi stanno nell'archivio: ora ci sono
+    try{ if(sessionStorage.getItem("pavpro.entra") === "1"){ sessionStorage.removeItem("pavpro.entra"); if(syncCfg()) entraInGestione(); } }catch(e){}   // appena collegato col codice
     if(tz){
       var dt = document.createElement("div");
       dt.className = "card novita";
