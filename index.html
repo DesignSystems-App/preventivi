@@ -830,7 +830,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109201701";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109202622";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -7629,7 +7629,7 @@ function scriviModulo(c){
   disegnaSceltaRivenditore(c);
   $("genDestWa").value = c && c.dest && c.dest.wa ? c.dest.wa.join("\n") : "";
   $("genDestMail").value = c && c.dest && c.dest.mail ? c.dest.mail.join("\n") : "";
-  SUOI_SEL = null; $("genSuoiCerca").value = ""; disegnaSuoiClienti(c ? c.id : null);
+  disegnaSuoiClienti(c ? c.id : null);
   $("genBase").value = c ? c.base : 20;
   $("genScad").value = c && c.scad ? c.scad : "";
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++){
@@ -7706,6 +7706,7 @@ function disegnaSceltaRivenditore(c){
   sel.innerHTML = '<option value="">\u2014 nessuno (cliente diretto) \u2014</option>'
     + clienti.filter(function(x){ return x.riv && x.id !== mio; }).map(function(x){ return '<option value="' + esc(x.id) + '">' + esc(x.nome || "(senza nome)") + '</option>'; }).join("");
   sel.value = (c && c.rivDi && clienti.some(function(x){ return x.id === c.rivDi && x.riv; })) ? c.rivDi : "";
+  sel.dataset.prima = sel.value;
 }
 function cardCliente(c){
     var n = (c.ecc||[]).length + (c.eccP||[]).length;
@@ -9114,32 +9115,21 @@ function disegnaSuoiClienti(mio){
   $("genDestWaL").textContent = riv ? "Altri WhatsApp per gli ordini fatti da lui (di solito vuoto)" : "WhatsApp che ricevono i suoi ordini (uno per riga)";
   $("genDestMailL").textContent = riv ? "Altre email per gli ordini fatti da lui (di solito vuoto)" : "Email che ricevono i suoi ordini (una per riga)";
   $("genRivHint").textContent = riv
-    ? "Qui sotto spunta i clienti di questo rivenditore: i loro ordini arrivano come sempre a noi e in copia anche a lui, al WhatsApp e all\u2019email scritti sopra in questa scheda. I clienti non vedono niente di tutto questo."
-    : "Per un cliente di un rivenditore: scegli il rivenditore dal menu, e qui sotto restano i recapiti a cui arrivano in copia i suoi ordini (si riempiono da soli col WhatsApp e l\u2019email del rivenditore). Il cliente non vede niente di tutto questo.";
+    ? "Per collegare un cliente a questo rivenditore apri la scheda del cliente e sceglilo nel menu \u00ab\u00c8 cliente del rivenditore\u00bb: i suoi ordini arrivano come sempre a noi e in copia anche al rivenditore, al WhatsApp e all\u2019email scritti sopra in questa scheda. I clienti non vedono niente di tutto questo."
+    : "Per un cliente di un rivenditore: scegli il rivenditore dal menu. Qui sotto si scrivono da soli il WhatsApp e l\u2019email del rivenditore, a cui arrivano in copia gli ordini di questo cliente. Il cliente non vede niente di tutto questo.";
+  /* i clienti gia' collegati restano quelli (servono a aggiornare i recapiti se cambia il numero del rivenditore) */
+  SUOI_SEL = {};
+  if(mio) clienti.forEach(function(c){ if(c.rivDi === mio && c.id !== mio) SUOI_SEL[c.id] = 1; });
   if(!riv) return;
-  if(!SUOI_SEL){ SUOI_SEL = {}; if(mio) clienti.forEach(function(c){ if(c.rivDi === mio && c.id !== mio) SUOI_SEL[c.id] = 1; }); }
-  var q = String($("genSuoiCerca").value || "").trim().toLowerCase();
-  var l = clienti.filter(function(c){ return c.id !== mio && !c.riv; })
-    .sort(function(a, b){ return String(a.nome || "").localeCompare(String(b.nome || ""), "it"); });
-  var vis = l.filter(function(c){ return !q || String(c.nome || "").toLowerCase().indexOf(q) >= 0 || SUOI_SEL[c.id]; });
-  $("genSuoi").innerHTML = vis.length ? vis.map(function(c){
-    var altro = (c.rivDi && c.rivDi !== mio) ? clienti.find(function(x){ return x.id === c.rivDi && x.riv; }) : null;
-    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13.5px;border-bottom:1px solid var(--line)"><input type="checkbox" data-suo="' + esc(c.id) + '"' + (SUOI_SEL[c.id] ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:var(--accent)"> <span>' + esc(c.nome || "(senza nome)")
-      + (altro ? ' <small style="color:var(--muted)">\u00b7 ora \u00e8 cliente di ' + esc(altro.nome || "") + (SUOI_SEL[c.id] ? ': salvando passa a questo' : '') + '</small>' : '') + '</span></label>';
-  }).join("") : '<p class="hint" style="margin:6px 0">' + (l.length ? "Nessun cliente con questo nome." : "Non ci sono ancora altri clienti: registrali e poi spuntali qui.") + '</p>';
-  var n = Object.keys(SUOI_SEL).length;
-  $("genSuoiInfo").textContent = (n ? n + (n === 1 ? " cliente spuntato" : " clienti spuntati") : "Nessun cliente spuntato") + ": vale quando premi Salva."
+  var suoi = clienti.filter(function(c){ return SUOI_SEL[c.id]; }).map(function(c){ return c.nome || "(senza nome)"; }).sort(function(a, b){ return a.localeCompare(b, "it"); });
+  var m = $("genSuoiInfo");
+  m.className = "msg" + (suoi.length ? " ok" : "");
+  m.textContent = (suoi.length ? "Suoi clienti (" + suoi.length + "): " + (suoi.length > 12 ? suoi.slice(0, 12).join(", ") + " e altri " + (suoi.length - 12) : suoi.join(", ")) + "."
+                               : "Ancora nessun cliente collegato a questo rivenditore.")
     + ((!$("genTel").value.trim() && !$("genMail").value.trim()) ? " Scrivi sopra il WhatsApp o l\u2019email del rivenditore, se no le copie degli ordini non hanno dove arrivare." : "");
 }
 $("genRiv").addEventListener("change", function(){ disegnaSuoiClienti(); });
-$("genSuoiCerca").addEventListener("input", function(){ disegnaSuoiClienti(); });
 ["genTel","genMail"].forEach(function(id){ $(id).addEventListener("input", function(){ if($("genRiv").checked) disegnaSuoiClienti(); }); });
-$("genSuoi").addEventListener("change", function(e){
-  var t = e.target.closest("[data-suo]"); if(!t) return;
-  if(!SUOI_SEL) SUOI_SEL = {};
-  if(t.checked) SUOI_SEL[t.getAttribute("data-suo")] = 1; else delete SUOI_SEL[t.getAttribute("data-suo")];
-  disegnaSuoiClienti();
-});
 function stessoWa(a, b){ var x = numeroWaCliente(a), y = numeroWaCliente(b); return !!x && x === y; }
 function stessaMail(a, b){ return !!String(a || "").trim() && String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase(); }
 function aggiungiRecapitiRiv(c, tel, mail){
@@ -9154,35 +9144,38 @@ function togliRecapitiRiv(c, tels, mails){
   c.dest.mail = (c.dest.mail || []).filter(function(x){ return !mails.some(function(t){ return stessaMail(x, t); }); });
   if(!c.dest.wa.length && !c.dest.mail.length) delete c.dest;
 }
-/* dopo il salvataggio della scheda di un rivenditore: collega i clienti spuntati, scollega gli altri.
+/* dopo il salvataggio della scheda di un rivenditore: se e' cambiato il suo WhatsApp o la sua email, i suoi clienti
+   mandano le copie ai recapiti nuovi; se non e' piu' rivenditore, i suoi clienti si scollegano.
    prima = {tel, mail, riv} del rivenditore prima del salvataggio. Ritorna {dentro, tolti}. */
 function collegaSuoiClienti(rv, prima){
   var out = {dentro:0, tolti:0}, ora = new Date().toISOString();
-  var vecchiTel = [prima.tel, rv.tel].filter(Boolean), vecchieMail = [prima.mail, rv.mail].filter(Boolean);
   clienti.forEach(function(c){
-    if(c.id === rv.id || c.riv) return;
-    var dentro = rv.riv && SUOI_SEL && !!SUOI_SEL[c.id];
-    if(dentro){
-      if(c.rivDi !== rv.id){
-        var vecchio = c.rivDi ? clienti.find(function(x){ return x.id === c.rivDi; }) : null;
-        if(vecchio) togliRecapitiRiv(c, [vecchio.tel], [vecchio.mail]);
-        c.rivDi = rv.id; c.aggiornato = ora; out.dentro++;
-      }
-      if(prima.tel && !stessoWa(prima.tel, rv.tel)) togliRecapitiRiv(c, [prima.tel], []);
-      if(prima.mail && !stessaMail(prima.mail, rv.mail)) togliRecapitiRiv(c, [], [prima.mail]);
-      aggiungiRecapitiRiv(c, rv.tel, rv.mail);
-    } else if(c.rivDi === rv.id && (rv.riv ? SUOI_SEL !== null : prima.riv)){
-      togliRecapitiRiv(c, vecchiTel, vecchieMail);
+    if(c.id === rv.id || c.rivDi !== rv.id) return;
+    if(rv.riv){
+      var telNuovo = String(prima.tel || "") !== String(rv.tel || "") && !stessoWa(prima.tel, rv.tel), mailNuova = !stessaMail(prima.mail, rv.mail) && String(prima.mail || "") !== String(rv.mail || "");
+      if(telNuovo){ if(prima.tel) togliRecapitiRiv(c, [prima.tel], []); aggiungiRecapitiRiv(c, rv.tel, ""); }
+      if(mailNuova){ if(prima.mail) togliRecapitiRiv(c, [], [prima.mail]); aggiungiRecapitiRiv(c, "", rv.mail); }
+    } else if(prima.riv){
+      togliRecapitiRiv(c, [prima.tel, rv.tel].filter(Boolean), [prima.mail, rv.mail].filter(Boolean));
       delete c.rivDi; c.aggiornato = ora; out.tolti++;
     }
   });
   return out;
 }
 $("genRivDi").addEventListener("change", function(){
-  var rv = clienti.find(function(x){ return x.id === $("genRivDi").value; });
-  if(!rv) return;
-  if(!$("genDestWa").value.trim() && rv.tel) $("genDestWa").value = rv.tel;
-  if(!$("genDestMail").value.trim() && rv.mail) $("genDestMail").value = rv.mail;
+  var sel = $("genRivDi"), rv = clienti.find(function(x){ return x.id === sel.value; });
+  var vecchio = clienti.find(function(x){ return x.id === sel.dataset.prima; });
+  var wa = righeNonVuote($("genDestWa").value), ml = righeNonVuote($("genDestMail").value);
+  if(vecchio){   // SER 09/11: passando a un altro rivenditore (o a nessuno), quello di prima non riceve piu' le copie
+    wa = wa.filter(function(x){ return !stessoWa(x, vecchio.tel); });
+    ml = ml.filter(function(x){ return !stessaMail(x, vecchio.mail); });
+  }
+  if(rv){
+    if(rv.tel && !wa.some(function(x){ return stessoWa(x, rv.tel); })) wa.push(rv.tel);
+    if(rv.mail && !ml.some(function(x){ return stessaMail(x, rv.mail); })) ml.push(rv.mail);
+  }
+  $("genDestWa").value = wa.join("\n"); $("genDestMail").value = ml.join("\n");
+  sel.dataset.prima = sel.value;
 });
 $("btnNotifiche").addEventListener("click", function(){
   if(notificheAttive()){ save("pavpro.notifiche.v1", false); disegnaStatoNotifiche(); return; }
