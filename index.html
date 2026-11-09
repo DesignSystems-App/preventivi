@@ -828,7 +828,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109104542";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109113337";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -4842,6 +4842,13 @@ $("righe").addEventListener("change", function(e){
     var vn0 = vocePerUid(edn.getAttribute("data-i")), primaN = edn.getAttribute("data-nome-prima");
     if(vn0 && primaN !== null && chiaveNome(primaN) !== chiaveNome(vn0.nome)){
       if(suOmonimi(vn0, "nome", {nome:primaN})){ salvaListino(); disegna(); }
+      var doppi = togliCopieDoppie(vn0);
+      if(doppi.length){
+        salvaListino(); disegna();
+        var mdp = $("copyMsg"); mdp.className = "msg ok";
+        mdp.textContent = vn0.nome + " c\u2019era gi\u00e0 " + (doppi.length === 1 ? "nella scheda \u00ab" + doppi[0] + "\u00bb" : "nelle schede " + doppi.map(function(x){ return "\u00ab" + x + "\u00bb"; }).join(", ")) + ": l\u00ec non l\u2019ho messo una seconda volta.";
+        mdp.dataset.tenere = "1"; setTimeout(function(){ mdp.dataset.tenere = ""; }, 8000);
+      }
     }
     if(vn0) edn.setAttribute("data-nome-prima", vn0.nome || "");
     return;
@@ -5289,6 +5296,22 @@ function mettiInTutteLeSchede(voce){
   return quante;
 }
 
+/* SER 09/11: un prodotto nuovo nasce in tutte le schede del sistema; se poi prende il nome di un prodotto
+   che in un'altra scheda c'e' gia' (es. PRIMER A300 aggiunto al fondo assorbente, che nel non assorbente c'e'
+   di fabbrica), la sua copia in quella scheda sarebbe un doppione: si toglie */
+function togliCopieDoppie(voce){
+  var g = gruppoCorrente(), fabbrica = uidDiFabbrica(), via = [];
+  if(!g || !voce || fabbrica[voce.uid]) return via;
+  var k = chiaveNome(voce.nome);
+  (g.varianti || []).forEach(function(v){
+    if(v === varianteCorrente()) return;
+    var i = (v.voci || []).findIndex(function(z){ return z.uid === voce.uid; });
+    if(i < 0) return;
+    if(!(v.voci || []).some(function(z){ return z.uid !== voce.uid && chiaveNome(z.nome) === k; })) return;
+    v.voci.splice(i, 1); via.push(v.nome || "");
+  });
+  return via;
+}
 function aggiungiProdotto(){
   /* anche dal listino di un cliente: il prodotto nuovo finisce sul listino generale, per tutti (SER, 04/11) */
   var nuova = {uid:uidNuovo(), nome:"Nuovo prodotto", role:"", unita:"KG",
@@ -9882,10 +9905,11 @@ function vociDaModifiche(testo){
   if(testo){ var p = leggiJson(testo); if(p.ok) mod = p.v; }
   try{
     var l = applicaModifiche(clone(LISTINO_BASE), mod ? clone(mod) : null);
-    scorriVoci(l, function(c, g, v){ out[c.uid] = {c:c, g:g.nome, v:v.nome}; });
+    scorriVoci(l, function(c, g, v){ out[c.uid + "|" + g.id + "|" + v.id] = {c:c, g:g.nome, v:v.nome, uid:c.uid}; });   /* scheda per scheda: lo stesso prodotto puo' stare in piu' schede */
   }catch(e){}
   return out;
 }
+function vocePerUidIn(mappa, uid){ for(var k in mappa) if(mappa[k].uid === uid) return mappa[k]; return null; }
 function righeModifiche(baseDati, mieDati, baseAll, mieAll){
   var righe = [], gruppiPrezzo = {};
   var aggiungi = function(t){ if(righe.indexOf(t) < 0) righe.push(t); };
@@ -9894,7 +9918,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
     var vb = vociDaModifiche(baseDati[K.mod]), vm = vociDaModifiche(mieDati[K.mod]), u;
     for(u in vm){
       var x = vm[u];
-      if(!vb[u]){ aggiungi("Prodotto nuovo: " + x.c.nome + " (" + x.g + ")"); continue; }
+      if(!vb[u]){ aggiungi("Prodotto nuovo: " + x.c.nome + " (" + x.g + (x.v ? " \u2014 " + x.v : "") + ")"); continue; }
       var y = vb[u];
       Object.keys(ETICHETTE_CAMPO).forEach(function(k){
         if(stessi(x.c[k], y.c[k])) return;
@@ -9904,7 +9928,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
         gruppiPrezzo[t] = gruppiPrezzo[t] || []; gruppiPrezzo[t].push(x.g);
       });
     }
-    for(u in vb) if(!vm[u]) aggiungi("Prodotto tolto: " + vb[u].c.nome + " (" + vb[u].g + ")");
+    for(u in vb) if(!vm[u]) aggiungi("Prodotto tolto: " + vb[u].c.nome + " (" + vb[u].g + (vb[u].v ? " \u2014 " + vb[u].v : "") + ")");
     Object.keys(gruppiPrezzo).forEach(function(t){
       var s = gruppiPrezzo[t].filter(function(g, i, a){ return a.indexOf(g) === i; });
       aggiungi(t + " \u2014 " + (s.length > 2 ? s.slice(0, 2).join(", ") + (s.length === 3 ? " e un altro sistema" : " e altri " + (s.length - 2) + " sistemi") : s.join(", ")));
@@ -9958,7 +9982,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
   var chiavi = {}, k; for(k in baseDati) chiavi[k] = 1; for(k in mieDati) chiavi[k] = 1;
   for(k in chiavi){ if(visti[k] || baseDati[k] === mieDati[k] || /ordini\.visti|\.letti\./.test(k)) continue;   /* gli ordini segnati come visti non sono modifiche */ aggiungi(NOMI[k] || ("Impostazione cambiata (" + k.replace(/^pavpro\./, "").replace(/\.v\d+$/, "") + ")")); }
   /* schede tecniche e foto */
-  var vm2 = null, nomeDi = function(u){ if(!vm2) vm2 = vociDaModifiche(mieDati[K.mod]); if(/^sis:/.test(u)){ var gg = (listinoGenerale().gruppi || []).find(function(g){ return "sis:" + g.id === u; }); return "foto del sistema " + (gg ? gg.nome : u.slice(4)); } return "scheda di " + (vm2[u] ? vm2[u].c.nome : u); };
+  var vm2 = null, nomeDi = function(u){ if(!vm2) vm2 = vociDaModifiche(mieDati[K.mod]); if(/^sis:/.test(u)){ var gg = (listinoGenerale().gruppi || []).find(function(g){ return "sis:" + g.id === u; }); return "foto del sistema " + (gg ? gg.nome : u.slice(4)); } var vx = vocePerUidIn(vm2, u); return "scheda di " + (vx ? vx.c.nome : u); };
   baseAll = baseAll || {}; mieAll = mieAll || {};
   for(var ua in mieAll){ if(baseAll[ua] === undefined) aggiungi("Caricata la " + nomeDi(ua)); else if(baseAll[ua] !== mieAll[ua]) aggiungi("Cambiata la " + nomeDi(ua)); }
   for(var ub in baseAll) if(mieAll[ub] === undefined) aggiungi("Tolta la " + nomeDi(ub));
@@ -9967,7 +9991,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
 }
 function descriviConflitto(via, dati){
   var m = /\.voci\.([^.\[]+)\.(\w+)/.exec(via) || /\[v:([^\]]+)\]/.exec(via) || /\[u:([^\]]+)\]\.(\w+)/.exec(via);
-  if(m && String(via).indexOf(K.mod) === 0){ var vv = vociDaModifiche(dati[K.mod])[m[1]]; return (vv ? vv.c.nome : "un prodotto") + (m[2] && ETICHETTE_CAMPO[m[2]] ? " (" + ETICHETTE_CAMPO[m[2]][0] + ")" : ""); }
+  if(m && String(via).indexOf(K.mod) === 0){ var vv = vocePerUidIn(vociDaModifiche(dati[K.mod]), m[1]); return (vv ? vv.c.nome : "un prodotto") + (m[2] && ETICHETTE_CAMPO[m[2]] ? " (" + ETICHETTE_CAMPO[m[2]][0] + ")" : ""); }
   var c = /\[i:([^\]]+)\]/.exec(via);
   if(c && String(via).indexOf(K.clienti) === 0){ var cl = (leggiJson(dati[K.clienti] || "[]").v || []).find(function(x){ return x.id === c[1]; }); return "cliente " + (cl ? cl.nome : ""); }
   if(String(via).indexOf(K.pw) === 0) return "la password della gestione";
@@ -10251,7 +10275,9 @@ if(!CLIENTE){
     var bd = document.getElementById("okDesc");
     if(bd) bd.addEventListener("click", function(){ dd.parentNode.removeChild(dd); });
   }
-  var portati = propagaProdottiMiei(listino);
+  /* SER 09/11: era una sistemazione da fare una volta sola (gia' fatta su tutti i dispositivi). Ripetuta a ogni apertura
+     rimetteva in tutte le schede i prodotti che SER aveva tolto da una scheda sola (es. il PRIMER A300 doppio) */
+  var portati = 0;
   if(portati){
     salvaListino();
     var d = document.createElement("div");
