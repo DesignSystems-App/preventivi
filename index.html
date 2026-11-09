@@ -828,7 +828,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109094746";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261109104542";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -5068,7 +5068,15 @@ $("righe").addEventListener("input", function(e){
     if(vc2 && vc2.catalogo && pa.value !== ""){
       var val = Number(pa.value);
       vc2.catalogo.modelli.forEach(function(z){ if(z.tipo===p3[1]) z.prezzo = val; });
-      suOmonimi(vc2, "catalogo"); salvaListino(); disegna();
+      suOmonimi(vc2, "catalogo"); salvaListino();
+      /* SER 09/11: niente ridisegno di tutta la pagina mentre scrivi (ti buttava fuori dal campo al primo numero):
+         si aggiornano solo i prezzi dei singoli modelli qui sotto e i totali */
+      vc2.catalogo.modelli.forEach(function(z){
+        if(z.tipo !== p3[1]) return;
+        var inp = document.querySelector('[data-pmod="' + p3[0] + '|' + z.id + '"]');
+        if(inp && inp !== document.activeElement) inp.value = z.prezzo === null ? "" : z.prezzo;
+      });
+      patchRiga(p3[0], "sten");
     }
     return;
   }
