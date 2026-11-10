@@ -524,7 +524,7 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
 @media print{ #frecce{display:none!important} }
 @media print{ #firma{border:1px solid #999} .firmariga{display:none!important}
   .topbar,.tabs,.btnrow,.step,.ghost,.schedabtn,.visore{display:none!important} body{background:#fff} .card{border-color:#999; break-inside:avoid} }
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 /* sul telefono le tessere dei colori sono piu’ piccole: tre per riga, quattro per il ghiaino */
 @media (max-width:620px){
   .colori{grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:12px 8px; padding:10px 8px}
@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110190114";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110194742";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1149,16 +1149,11 @@ if(CLIENTE && SORGENTE === "online"){
       if(destLink && typeof destLink === "object"){ destLink = {wa:(destLink.wa||[]).map(String), mail:(destLink.mail||[]).map(String)}; if(!destLink.wa.length && !destLink.mail.length) destLink = null; }
       LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", mail:qq.e||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||"", dest:destLink,
                   rivWa:String(qq.r||"").replace(/[^0-9]/g, ""), rivNome:qq.rn||"", ditta:qq.a||""};
-      /* SER 10/11 sera: l'icona sulla schermata Home dell'iPhone ha una memoria sua, separata da Safari: senza questo
-         chiedeva di nuovo numero e approvazione. Safari, dopo l'attivazione, mette nell'indirizzo il suo "telefono" (dv):
-         l'icona aggiunta da li' lo riprende, ma solo se e' davvero l'icona della Home (un indirizzo girato e aperto
-         in un browser non lo usa) e solo se questa memoria non ha gia' un suo telefono. */
-      var dvUrl = String(qq.dv || "").replace(/[^a-z0-9]/g, "").slice(0, 40);
-      var daHome = (window.navigator && window.navigator.standalone === true) || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-      /* anche se questa icona aveva gia' un suo "telefono" non attivato (per esempio rifiutato in una prova di prima):
-         quello di Safari e' attivo e vale di piu' */
-      var giaQui = load(K.link, null);
-      if(dvUrl && daHome && dvUrl !== load(K.device, null) && !(giaQui && giaQui.attivato)){ save(K.device, dvUrl); drop("pavpro.rifiuto.v1"); LINK_CLI.dvAdottato = true; }   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
+      /* SER 10/11 notte: l'icona sulla schermata Home dell'iPhone ha una memoria sua, separata da Safari: senza altro
+         chiederebbe di nuovo numero e approvazione. Il browser gia' attivato registra sul servizio un gettone che vale
+         una volta sola e lo mette nell'indirizzo (tk): l'icona aggiunta da li' lo presenta e si attiva da sola.
+         Vale solo dall'icona della Home, una volta, e c'e' una sola icona per link: un indirizzo girato ad altri non apre niente. */
+      var tkUrl = String(qq.tk || "").replace(/[^a-z0-9]/g, "").slice(0, 40);
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
@@ -1176,19 +1171,18 @@ if(CLIENTE && SORGENTE === "online"){
         && ((giaOk.id && LINK_CLI.id) ? giaOk.id === LINK_CLI.id : giaOk.code === LINK_CLI.code);
       if(stessoLink){
         LINK_CLI.attivato = true; LINK_CLI.okTel = true; LINK_CLI.telOk = giaOk.telOk || "";
+        if(giaOk.tk){ LINK_CLI.tk = giaOk.tk; LINK_CLI.tkOk = !!giaOk.tkOk; }
       } else {
         LINK_CLI.daConfermare = true;
         LINK_CLI.okTel = !LINK_CLI.t;            // senza impronta non c'e' numero da chiedere
         if(stessoInAttesa) LINK_CLI.inAttesa = giaOk.inAttesa;
+        if(giaOk && giaOk.passaNo) LINK_CLI.passaNo = giaOk.passaNo;
+        if(tkUrl.length >= 16 && inHome() && LINK_CLI.passaNo !== tkUrl) LINK_CLI.passa = tkUrl;
       }
       save(K.link, LINK_CLI);          // e resta anche nell'indirizzo: la schermata Home lo riusa
     }
   }catch(e){ LINK_CLI = null; }
   if(!LINK_CLI) LINK_CLI = load(K.link, null);
-  /* attivo: l'indirizzo porta il "telefono" di questa pagina, cosi' l'icona aggiunta alla schermata Home lo ritrova */
-  if(LINK_CLI && LINK_CLI.attivato && /(^|[#&])c=/.test(location.hash || "") && !/[#&]dv=/.test(location.hash || "")){
-    try{ history.replaceState(null, "", location.pathname + location.search + location.hash + "&dv=" + idDispositivo()); }catch(e){}
-  }
   if(LINK_CLI && LINK_CLI.daConfermare){ /* il listino parte solo dopo la conferma del numero */ }
   else if(LINK_CLI && LINK_CLI.code && DATI) DATI.cliente = {nome:LINK_CLI.nome||"", code:LINK_CLI.code};
   /* un link personale toccato mentre l'app e' gia' aperta: si riparte */
@@ -2234,7 +2228,7 @@ function prezziCompleti(l){
     if(out[c.uid]) return;                       // gemelli: stesso prodotto in piu' sistemi, stessi prezzi
     var d = {prezzoConf: prezzoPulito(c.prezzoConf)};
     if((c.confs||[]).length){ d.confs = {}; c.confs.forEach(function(z){ if(z && z.id) d.confs[z.id] = prezzoPulito(z.prezzo); }); }
-    if((c.colori||[]).some(function(k){ return k && prezzoPulito(k.prezzo) !== null; })){ d.colori = {}; c.colori.forEach(function(k){ if(k && k.n !== undefined && k.prezzo !== undefined) d.colori[k.n] = prezzoPulito(k.prezzo); }); }
+    if((c.colori||[]).some(function(k){ return k && k.prezzo !== undefined; })){ d.colori = {}; c.colori.forEach(function(k){ if(k && k.n !== undefined && k.prezzo !== undefined) d.colori[k.n] = prezzoPulito(k.prezzo); }); }
     if((c.finiture||[]).length){ d.finiture = {}; c.finiture.forEach(function(z){ if(z && z.id) d.finiture[z.id] = prezzoPulito(z.prezzo); }); }
     if(c.catalogo && (c.catalogo.modelli||[]).length){ d.catalogo = {}; c.catalogo.modelli.forEach(function(m){ if(m && m.id) d.catalogo[m.id] = prezzoPulito(m.prezzo); }); }
     out[c.uid] = d;
@@ -2302,6 +2296,17 @@ function proteggiListiniClienti(){
           cv[k] = cv[k] || {}; cv[k][id] = o[k][id]; mio = true;
         }
       });
+      /* SER 10/11 notte: un colore che nel generale prende un prezzo suo (prima non l'aveva e seguiva il prezzo del
+         prodotto): per chi ha il listino bloccato continua a seguire il prezzo del prodotto (null scritto apposta) */
+      if(n.colori && c.fisso && (c.voci[uid] || o.prezzoConf !== null)){
+        for(var cn in n.colori){
+          var eraC = (o.colori && (cn in o.colori)) ? o.colori[cn] : null;
+          if(n.colori[cn] === null || eraC !== null) continue;
+          if(cv.colori && (cn in cv.colori)) continue;
+          cv.colori = cv.colori || {}; cv.colori[cn] = null; mio = true;
+          if(!("prezzoConf" in cv) && o.prezzoConf !== null){ cv.prezzoConf = o.prezzoConf; }
+        }
+      }
       if(mio){ c.voci[uid] = cv; cambiato = true; }
     }
     if(cambiato){ c.fisso = true; protetti++; }
@@ -7919,7 +7924,7 @@ $("btnGenera").addEventListener("click", function(){
   if(!d.ditta){ m.className="msg err"; m.textContent="Scrivi la ragione sociale del cliente: \u00e8 obbligatoria."; $("genDitta").focus(); return; }
   var code = creaCodice(d.base, d.ecc, d.scad, d.eccP);
   var ora = new Date().toISOString();
-  var idSalvato = cliInModifica;
+  var idSalvato = cliInModifica, copiatoDaAltri = false;
   var primaRiv = {tel:"", mail:"", riv:false};
   if(cliInModifica){
     var c = clienti.find(function(x){ return x.id === cliInModifica; });
@@ -7933,6 +7938,7 @@ $("btnGenera").addEventListener("click", function(){
     if(d.rivDi) nuovoCli.rivDi = d.rivDi;
     if(riusaDa){
       var sorg = clienti.find(function(x){ return x.id === riusaDa.id; });
+      copiatoDaAltri = !!(sorg && !RIV && (sorg.rivDi || "") !== (d.rivDi || ""));
       if(haListinoSuo(sorg)){ nuovoCli.voci = prezziCompleti(applicaVociCliente(clone(listinoGenerale()), clone(sorg.voci))); nuovoCli.fisso = true; }   // copia bloccata, tutta: poi vale solo per lui
     }
     clienti.unshift(nuovoCli);
@@ -7945,7 +7951,7 @@ $("btnGenera").addEventListener("click", function(){
   var rivC = (rvSalv && !rvSalv.riv) ? rivDelCliente(rvSalv) : null, ricalcolati = false;
   if(rivC){
     var ricPrima = primaRiv.ricarico, cambiaRic = (ricPrima === undefined) ? d.ricarico !== 0 : ricPrima !== d.ricarico;
-    if(!haListinoSuo(rvSalv) || cambiaRic || (!RIV && primaRiv.rivDi && primaRiv.rivDi !== rvSalv.rivDi)){
+    if(!haListinoSuo(rvSalv) || cambiaRic || copiatoDaAltri || (!RIV && primaRiv.rivDi && primaRiv.rivDi !== rvSalv.rivDi)){
       var vRc = vociClienteRiv(rivC, d.ricarico);
       if(vRc){ rvSalv.voci = vRc; rvSalv.fisso = true; ricalcolati = true; }
     }
@@ -9655,6 +9661,7 @@ function attAdmin(azione, cli, m){
         if(s && !s.device && att){ m.className = "msg"; m.textContent = att + (att === 1 ? " richiesta di attivazione in attesa" : " richieste di attivazione in attesa") + ": guarda il riquadro in cima a questa scheda."; disegnaRichieste(); return; }
         m.textContent = "Link di " + (cli.nome||"cliente") + ": " + (!s || !s.device ? "non ancora attivato su nessun telefono."
           : (s.bloccato ? "BLOCCATO." : "attivato il " + new Date(s.quando).toLocaleDateString("it-IT") + " alle " + new Date(s.quando).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) + (s.tel ? " dal numero " + s.tel : "") + "."
+             + (s.casa ? " Icona sulla schermata Home attivata" + (s.quandoCasa ? " il " + new Date(s.quandoCasa).toLocaleDateString("it-IT") + " alle " + new Date(s.quandoCasa).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : "") + "." : "")
              + (s.device2 ? " Secondo browser dello stesso telefono accettato" + (s.quando2 ? " alle " + new Date(s.quando2).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) : "") + "." : "")
              + (s.rifiutati ? " \u26a0 " + s.rifiutati + (s.rifiutati === 1 ? " tentativo rifiutato" : " tentativi rifiutati") + " da altri telefoni" + (s.ultimoRifiuto ? " (ultimo il " + new Date(s.ultimoRifiuto).toLocaleDateString("it-IT") + " alle " + new Date(s.ultimoRifiuto).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) + ")" : "") + ": il link \u00e8 stato girato a qualcuno." : "")));
       } else if(azione === "sblocca") m.textContent = "Link di " + (cli.nome||"cliente") + " sbloccato: il prossimo telefono che lo apre lo attiva.";
@@ -9680,15 +9687,24 @@ function idDispositivo(){
   if(!d){ d = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); save(K.device, d); }
   return d;
 }
+function inHome(){ return (window.navigator && window.navigator.standalone === true) || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches); }
+function gettoneNuovo(){
+  var a = "abcdefghijkmnpqrstuvwxyz23456789", s = "", u;
+  try{ u = new Uint8Array(24); (window.crypto || window.msCrypto).getRandomValues(u); for(var i = 0; i < u.length; i++) s += a[u[i] % a.length]; }
+  catch(e){ s = ""; while(s.length < 24) s += a[Math.floor(Math.random() * a.length)]; }
+  return s;
+}
 function urlAttivazioni(){
   var u = (CLIENTE && DATI && DATI.attivaUrl) || (!CLIENTE && (load(K.att, null)||{}).url) || "";
   return /^https?:\/\//i.test(u) ? u.replace(/\/+$/, "") : "";
 }
 /* poi(ok, motivo): ok anche quando il servizio non e' configurato */
-function attivaSulServizio(tel, poi){
+function attivaSulServizio(tel, poi, altro){
   var u = urlAttivazioni();
   if(!u || !LINK_CLI || !LINK_CLI.id){ poi(true, ""); return; }
-  var corpo = JSON.stringify({id:LINK_CLI.id, device:idDispositivo(), tel:String(tel||"").replace(/[^0-9+]/g,"").slice(0,20), nome:LINK_CLI.nome||""});
+  var dati = {id:LINK_CLI.id, device:idDispositivo(), tel:String(tel||"").replace(/[^0-9+]/g,"").slice(0,20), nome:LINK_CLI.nome||""};
+  if(altro) for(var ka in altro) dati[ka] = altro[ka];
+  var corpo = JSON.stringify(dati);
   fetch(u + "/attiva", {method:"POST", headers:{"Content-Type":"application/json"}, body:corpo})
     .then(function(r){ return r.json(); })
     .then(function(j){ poi(!!(j && j.ok), (j && j.motivo) || "", j || {}); })
@@ -9706,6 +9722,7 @@ function testoRifiuto(motivo){
   var box = document.getElementById("confermaBox"), b = document.getElementById("btnConfermaTel");
   if(!box || !b) return;
   var rif = load("pavpro.rifiuto.v1", null);
+  if(rif && rif.motivo && LINK_CLI && LINK_CLI.passa){ drop("pavpro.rifiuto.v1"); rif = null; }
   if(rif && rif.motivo){
     drop("pavpro.rifiuto.v1");
     box.hidden = false; box.querySelector(".btnrow").hidden = true;
@@ -9726,7 +9743,7 @@ function testoRifiuto(motivo){
     var msgWa = T("Attivazione app Preventivi Pavimenti") + " \u2014 " + (LINK_CLI.nome || "") + " \u2014 " + T("codice") + " " + codice;
     row.innerHTML = '<a class="btn small" id="btnMandaCodice"' + (suTelefono() ? '' : ' target="_blank" rel="noopener"') + ' href="' + esc(linkWhatsApp(numeroWa(LINK_CLI.rivWa) || numeroWa(AZIENDA.wa), msgWa)) + '">Manda il codice su WhatsApp</a>'
       + '<button class="btn sec small" type="button" id="btnRicontrolla">Ho mandato il codice</button>';
-    m.className = "msg"; m.textContent = "In attesa dell\u2019approvazione di " + (AZIENDA.nome || "Design Systems") + "\u2026 (controllo da solo ogni 10 secondi)";
+    m.className = "msg"; m.textContent = "In attesa dell\u2019approvazione di " + ((LINK_CLI.rivWa && LINK_CLI.rivNome) || AZIENDA.nome || "Design Systems") + "\u2026 (controllo da solo ogni 10 secondi)";
     document.getElementById("btnRicontrolla").addEventListener("click", function(){ finisci(tel, true); });
     clearTimeout(attesaTimer); attesaTimer = setTimeout(function(){ finisci(tel, true); }, 10000);
   }
@@ -9761,17 +9778,31 @@ function testoRifiuto(motivo){
     box.querySelector("h3").textContent = "Benvenuto" + (LINK_CLI.nome ? ", " + LINK_CLI.nome : "");
     box.querySelector("p.corpo").textContent = "Questo \u00e8 il tuo listino personale di " + (AZIENDA.nome || "Design Systems") + ". Per attivarlo scrivi il numero di cellulare a cui \u00e8 stato mandato il link.";
   }
-  if(LINK_CLI.daConfermare && LINK_CLI.inAttesa && !LINK_CLI.dvAdottato){
+  if(LINK_CLI.daConfermare && LINK_CLI.inAttesa && !LINK_CLI.passa){
     /* riaperta mentre aspetta l'approvazione: si riprende da li' */
     box.hidden = false;
     mostraAttesa(LINK_CLI.inAttesa.tel || "", LINK_CLI.inAttesa.codice || "");
     finisci(LINK_CLI.inAttesa.tel || "", true);
-  } else if(LINK_CLI.daConfermare && LINK_CLI.dvAdottato){
-    /* icona della schermata Home aggiunta da Safari gia' attivato: stesso telefono, niente numero da riscrivere */
+  } else if(LINK_CLI.daConfermare && LINK_CLI.passa){
+    /* icona della schermata Home aggiunta dal browser gia' attivato: presenta il gettone, niente numero da riscrivere */
     box.hidden = false;
     box.querySelector("p.corpo").textContent = "Attivo il tuo listino su questo telefono\u2026";
     box.querySelector(".btnrow").hidden = true;
-    finisci("");
+    var gett = LINK_CLI.passa;
+    attivaSulServizio("", function(ok, motivo){
+      if(ok){
+        LINK_CLI.attivato = true; LINK_CLI.okTel = true; delete LINK_CLI.daConfermare; delete LINK_CLI.inAttesa; delete LINK_CLI.passa;
+        save(K.link, LINK_CLI);
+        m.className = "msg ok"; m.textContent = "Listino attivato su questo telefono.";
+        setTimeout(function(){ location.reload(); }, 600);
+      } else if(motivo === "rete"){
+        m.className = "msg err"; m.textContent = testoRifiuto("rete");          // alla prossima apertura riprova
+      } else {
+        /* gettone gia' usato o non piu' valido: si attiva come sempre, con il numero */
+        delete LINK_CLI.passa; LINK_CLI.passaNo = gett; save(K.link, LINK_CLI);
+        location.reload();
+      }
+    }, {passa:gett, soloPassa:true});
   } else if(LINK_CLI.daConfermare){
     box.hidden = false;
     if(LINK_CLI.okTel){
@@ -9812,6 +9843,34 @@ function testoRifiuto(motivo){
     }
     controlloSilenzioso();
     setInterval(controlloSilenzioso, 90000);
+    /* il gettone per l'icona della schermata Home: lo registra solo il browser (non l'icona), a ogni apertura controlla
+       che non sia gia' stato usato (in quel caso ne fa uno nuovo) e lo tiene nell'indirizzo */
+    var gettInCorso = false;
+    function mettiGettone(){
+      try{
+        var h = String(location.hash || "").replace(/&(tk|dv)=[a-z0-9]*/g, "");
+        if(/(^|[#&])c=/.test(h)) history.replaceState(null, "", location.pathname + location.search + h + (LINK_CLI.tk && LINK_CLI.tkOk ? "&tk=" + LINK_CLI.tk : ""));
+      }catch(e){}
+    }
+    function gettoneHome(nuovo){
+      if(gettInCorso && !nuovo) return; gettInCorso = true;
+      if(!LINK_CLI.tk || nuovo){ LINK_CLI.tk = gettoneNuovo(); LINK_CLI.tkOk = false; save(K.link, LINK_CLI); }
+      fetch(urlAttivazioni() + "/passa", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:LINK_CLI.id, device:idDispositivo(), token:LINK_CLI.tk})})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          gettInCorso = false;
+          if(!j || !j.ok || j.passa !== true){ LINK_CLI.tkOk = false; mettiGettone(); return; }      // servizio prima della 21.2: niente gettone
+          if(j.usato){ LINK_CLI.tkOk = false; mettiGettone(); if(!nuovo) gettoneHome(true); return; }
+          if(!LINK_CLI.tkOk){ LINK_CLI.tkOk = true; save(K.link, LINK_CLI); }
+          mettiGettone();
+        })
+        .catch(function(){ gettInCorso = false; });
+    }
+    if(!inHome() && LINK_CLI.id){
+      mettiGettone();
+      gettoneHome(false);
+      document.addEventListener("visibilitychange", function(){ if(!document.hidden) gettoneHome(false); });
+    }
   }
 })();
 
@@ -11071,6 +11130,30 @@ function migraListinoPosatori(){
   save("pavpro.migra.posatori.v1", {quando:new Date().toISOString(), prodotti:out.cambiati, bloccati:out.bloccati, dalVecchio:out.dalVecchio, dalRiv:out.dalRiv});
   return out;
 }
+/* SER 10/11 notte: uniformando il listino generale a quello dei POSATORI, tre colori (GHIAINO rosa perlato e beige,
+   BETON MIX neutro con cemento bianco) hanno preso nel generale un prezzo loro; nei listini bloccati degli altri clienti
+   quei colori non avevano un prezzo loro (seguivano il prezzo del prodotto) e quindi hanno cominciato a mostrare quello
+   del generale. Qui si rimettono com'erano: in ogni listino bloccato, un colore senza prezzo suo torna a seguire il
+   prezzo del prodotto di quel cliente. Non cambia nessun altro prezzo. Una volta sola, dal dispositivo del titolare. */
+function riparaColoriBloccati(){
+  if(CLIENTE || RIV || load("pavpro.migra.colori1110.v1", null)) return null;
+  if(!SYNC.attiva || !SYNC.pronto || SYNC.ruolo !== "titolare" || SYNC.incompleta || SYNC.errore) return null;
+  if(!load("pavpro.migra.posatori.v1", null)) return null;
+  var gen = listinoGenerale(), conPrezzo = {}, fatti = [];
+  scorriVoci(gen, function(c){ (c.colori||[]).forEach(function(k){ if(k && k.n !== undefined && prezzoPulito(k.prezzo) !== null){ conPrezzo[c.uid] = conPrezzo[c.uid] || []; if(conPrezzo[c.uid].indexOf(k.n) < 0) conPrezzo[c.uid].push(k.n); } }); });
+  clienti.forEach(function(c){
+    if(!c.fisso || !haListinoSuo(c)) return;
+    var n = 0;
+    for(var uid in conPrezzo){
+      var cv = c.voci[uid]; if(!cv) continue;
+      conPrezzo[uid].forEach(function(nome){ if(cv.colori && (nome in cv.colori)) return; cv.colori = cv.colori || {}; cv.colori[nome] = null; n++; });
+    }
+    if(n){ c.aggiornato = new Date().toISOString(); fatti.push((c.nome || "(senza nome)") + " (" + n + ")"); }
+  });
+  if(fatti.length) salvaClienti();
+  save("pavpro.migra.colori1110.v1", {quando:new Date().toISOString(), clienti:fatti});
+  return fatti;
+}
 function syncAvvio(poi){
   if(CLIENTE || !MEMORIA_OK){ SYNC.pronto = true; poi(); return; }
   if(load("pavpro.sync.incompleta.v1", null) && syncCfg()){
@@ -11121,6 +11204,7 @@ function syncDisegna(){
 document.addEventListener("visibilitychange", function(){
   if(document.hidden && SYNC.timer && SYNC.attiva){ clearTimeout(SYNC.timer); SYNC.timer = null; syncSpingi(false); return; }   /* si cambia app sul telefono: manda subito */
   if(document.hidden && SYNC.inArrivo && SYNC.attiva) syncControlla();     /* le modifiche degli altri arrivano adesso, mentre non guardi */
+  if(!document.hidden && SYNC.inArrivo && SYNC.attiva){ SYNC.aggiornaOra = true; syncControlla(); }   /* sul telefono, in secondo piano, l'app e' ferma: si aggiorna appena ci torni */
 });
 /* SER 10/11 sera: le modifiche fatte su un altro dispositivo non ricaricano piu' l'app mentre la usi */
 function syncInArrivo(j){
@@ -11165,6 +11249,7 @@ if(!CLIENTE){
     var ros = rimettiRosoni();
     if(tz || tz4 || tz5 || tz6 || tz7 || ds || ros){ propagaDescrizioni(listino); salvaListino(); }   // i prodotti nuovi prendono subito la descrizione degli omonimi
     var mPos = null; try{ mPos = migraListinoPosatori(); }catch(e){ mPos = null; }
+    try{ riparaColoriBloccati(); }catch(e){}
     if(mPos){
       var dP = document.createElement("div"); dP.className = "card novita";
       dP.innerHTML = '<h3>Listino generale uguale a quello dei POSATORI</h3>'
@@ -11346,7 +11431,7 @@ traduciPagina();
       if(!j || !j.ok || !j.dati || !j.dati.c) return giaLungo ? "" : "vecchio";
       var q = j.dati, h = "#c=" + encodeURIComponent(q.c) + "&n=" + encodeURIComponent(q.n||"") + "&i=" + encodeURIComponent(q.i||"")
         + (q.e ? "&e=" + encodeURIComponent(q.e) : "") + (q.t ? "&t=" + q.t : "") + (q.p ? "&p=" + q.p : "") + (q.d ? "&d=" + q.d : "") + (q.r ? "&r=" + q.r : "") + (q.rn ? "&rn=" + encodeURIComponent(q.rn) : "") + (q.a ? "&a=" + encodeURIComponent(q.a) : "") + "&k=" + mk[2];
-      var mdv = /(^|[#&])dv=([a-z0-9]{4,40})(&|$)/.exec(location.hash || ""); if(mdv) h += "&dv=" + mdv[2];   /* il telefono di questa pagina (per l'icona della Home) resta */
+      var mtk = /(^|[#&])tk=([a-z0-9]{16,40})(&|$)/.exec(location.hash || ""); if(mtk) h += "&tk=" + mtk[2];   /* il gettone per l'icona della schermata Home resta nell'indirizzo */
       if(location.hash !== h) history.replaceState(null, "", location.pathname + location.search + h);
       return "";
     }).catch(function(){ return giaLungo ? "" : "rete"; });
