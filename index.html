@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110184608";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110190114";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1155,7 +1155,10 @@ if(CLIENTE && SORGENTE === "online"){
          in un browser non lo usa) e solo se questa memoria non ha gia' un suo telefono. */
       var dvUrl = String(qq.dv || "").replace(/[^a-z0-9]/g, "").slice(0, 40);
       var daHome = (window.navigator && window.navigator.standalone === true) || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-      if(dvUrl && daHome && !load(K.device, null)){ save(K.device, dvUrl); LINK_CLI.dvAdottato = true; }   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
+      /* anche se questa icona aveva gia' un suo "telefono" non attivato (per esempio rifiutato in una prova di prima):
+         quello di Safari e' attivo e vale di piu' */
+      var giaQui = load(K.link, null);
+      if(dvUrl && daHome && dvUrl !== load(K.device, null) && !(giaQui && giaQui.attivato)){ save(K.device, dvUrl); drop("pavpro.rifiuto.v1"); LINK_CLI.dvAdottato = true; }   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
@@ -9758,7 +9761,7 @@ function testoRifiuto(motivo){
     box.querySelector("h3").textContent = "Benvenuto" + (LINK_CLI.nome ? ", " + LINK_CLI.nome : "");
     box.querySelector("p.corpo").textContent = "Questo \u00e8 il tuo listino personale di " + (AZIENDA.nome || "Design Systems") + ". Per attivarlo scrivi il numero di cellulare a cui \u00e8 stato mandato il link.";
   }
-  if(LINK_CLI.daConfermare && LINK_CLI.inAttesa){
+  if(LINK_CLI.daConfermare && LINK_CLI.inAttesa && !LINK_CLI.dvAdottato){
     /* riaperta mentre aspetta l'approvazione: si riprende da li' */
     box.hidden = false;
     mostraAttesa(LINK_CLI.inAttesa.tel || "", LINK_CLI.inAttesa.codice || "");
