@@ -287,6 +287,11 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .soloprezzi .editgrid input[data-ed="prezzoConf"], .soloprezzi .editgrid input[data-cfpz], .soloprezzi .editgrid input[data-cpz], .soloprezzi .editgrid input[data-fnpz]{
   border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft)}
 .installa{border-color:var(--accent); background:var(--accent-soft)}
+/* SER 10/11: area rivenditore: solo i suoi clienti, i loro prezzi, link, attivazioni e ordini */
+body.rivenditore #nuoviBox, body.rivenditore #gestSistema, body.rivenditore #allineaBox, body.rivenditore #statoMod,
+body.rivenditore [data-cliavviso], body.rivenditore [data-orddel], body.rivenditore #genRivCard, body.rivenditore #btnWa, body.rivenditore #btnMail,
+body.rivenditore .rivedit, body.rivenditore [data-pdfadd], body.rivenditore #cardOrdGest, body.rivenditore #btnNotifiche, body.rivenditore #notifStato,
+body.rivenditore [data-inoltra], body.rivenditore .coledit > .l, body.rivenditore .vbox > .hint{display:none !important}
 /* finche' il link personale non e' attivo si vede solo la pagina di attivazione */
 body.attivazione #contenuto > :not(#confermaBox), body.attivazione .wrap > :not(#contenuto):not(#confermaBox){display:none !important}
 body.attivazione #confermaBox{display:block; margin-top:18px; padding:22px 18px}
@@ -830,7 +835,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261109202622";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110102637";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1133,7 +1138,8 @@ if(CLIENTE && SORGENTE === "online"){
       var destLink = null;
       if(qq.d){ try{ destLink = JSON.parse(testoDaBase64Url(qq.d)); }catch(e){ destLink = null; } }
       if(destLink && typeof destLink === "object"){ destLink = {wa:(destLink.wa||[]).map(String), mail:(destLink.mail||[]).map(String)}; if(!destLink.wa.length && !destLink.mail.length) destLink = null; }
-      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", mail:qq.e||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||"", dest:destLink};
+      LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", mail:qq.e||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||"", dest:destLink,
+                  rivWa:String(qq.r||"").replace(/[^0-9]/g, ""), rivNome:qq.rn||""};   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
@@ -2672,6 +2678,14 @@ function sincronizzaGemelli(){
 
 function salvaListino(){
   if(CLIENTE) return;                 // l'app cliente non modifica niente, quindi non salva niente
+  if(RIV){
+    /* il rivenditore cambia solo i prezzi dei suoi clienti: il listino Design Systems resta com'e' */
+    if(!RIV.gen){ var me = $("cliListinoMsg"); me.className = "msg err"; me.textContent = "Il listino Design Systems non \u00e8 arrivato dal sito: chiudi e riapri l\u2019app, poi rifai il cambio. Niente \u00e8 stato salvato."; return; }
+    if(cliListino){ salvaVociCliente(); return; }
+    if(RIV.gen){ listino = normalizza(clone(RIV.gen)); disegna(); }
+    var mr = $("cliListinoMsg"); mr.className = "msg err"; mr.textContent = "Il listino Design Systems non si cambia da qui: scegli un tuo cliente in \u00abPrezzi di\u00bb e cambia i suoi prezzi.";
+    return;
+  }
   aggiornaElencoProdotti(listinoGenerale());   // un prodotto nuovo entra subito negli sconti per prodotto
   if(cliListino){
     /* stiamo sul listino di un cliente: i prezzi restano suoi, tutto il resto (colori,
@@ -4303,7 +4317,19 @@ function disegnaRighe(r){
   }).join("");
   /* sul listino di un cliente: i prezzi (campi evidenziati) restano suoi; tutto il resto
      — colori, confezioni, consumi, descrizioni, prodotti nuovi — va sul listino generale e vale per tutti */
-  if(cliListino){
+  if(RIV){
+    /* SER 10/11: il rivenditore cambia SOLO i prezzi: prodotti, descrizioni, schede, consumi, confezioni, colori, finiture restano come sono */
+    var SOLO_GESTIONE = ["cfadd","cfdel","cfkg","cfon","cfstd","ckadd","ckdel","ckfoto","ckfotodel","ckg","cknome","cknota","collega","colsis","coltend","csadd","csdel","csnome","csresa","csv","del",
+      "fnadd","fncomp","fndel","fnkg","fnnome","fnon","fnstd","gro","groadd","grodel","grpadd","grtutti","nascondi","pcapri","pcdi","pclega","pcpct","scobbl","scollega","sctit","tccopia","tcpdf","tcvia","pdfadd","rivcons"]
+      .map(function(k){ return "[data-" + k + "]"; }).join(",");
+    $("righe").querySelectorAll(SOLO_GESTIONE + ', input[data-ed]:not([data-ed="prezzoConf"]), input[type=file], label.filepick').forEach(function(el){ el.disabled = true; if(el.tagName === "BUTTON" || el.tagName === "LABEL" || el.type === "file" || el.type === "checkbox") el.hidden = true; });
+    var SOLO_PREZZI = 'input[data-ed="prezzoConf"],input[data-cfpz],input[data-cpz],input[data-fnpz],input[data-pmod],input[data-pall]';
+    $("righe").querySelectorAll('.editgrid, .coledit').forEach(function(eg){
+      eg.querySelectorAll('input, select, textarea, button').forEach(function(el){ if(!el.matches(SOLO_PREZZI)){ el.disabled = true; if(el.tagName === "BUTTON") el.hidden = true; } });
+      if(eg.classList.contains("editgrid")) Array.prototype.forEach.call(eg.children, function(d){ if(!d.querySelector(SOLO_PREZZI) && !d.matches(SOLO_PREZZI)) d.hidden = true; });
+      if(cliListino && eg.classList.contains("editgrid")){ var av2 = document.createElement("p"); av2.className = "hint full"; av2.style.margin = "0 0 8px"; av2.textContent = "Qui cambi i prezzi di questo tuo cliente: valgono solo per lui."; eg.insertBefore(av2, eg.firstChild); }
+    });
+  } else if(cliListino){
     $("righe").querySelectorAll('.row.soloprezzi .editgrid').forEach(function(eg){
       var av = document.createElement("p"); av.className = "hint full"; av.style.margin = "0 0 8px";
       av.innerHTML = 'I <b>prezzi</b> (campi evidenziati) valgono solo per questo cliente. Tutto il resto \u2014 colori, confezioni, consumi, descrizioni \u2014 va sul <b>listino generale</b> e vale per tutti i clienti.';
@@ -5650,7 +5676,16 @@ function linkCliente(cli){
   if(voci && Object.keys(voci).length) url += "&p=" + base64UrlDaTesto(JSON.stringify(voci));
   var dd = destinatariDi(cli);
   if(dd) url += "&d=" + base64UrlDaTesto(JSON.stringify(dd));
+  var rvA = rivenditoreConArea(cli);
+  if(rvA && numeroWaCliente(rvA.tel)) url += "&r=" + numeroWaCliente(rvA.tel) + "&rn=" + encodeURIComponent(rvA.nome || "");
   return url;
+}
+/* SER 10/11: il rivenditore del cliente, se ha l'area rivenditore: a lui va il codice di attivazione */
+function rivenditoreConArea(cli){
+  if(!cli || !cli.rivDi) return null;
+  if(RIV && cli.rivDi === RIV.io.id) return RIV.io;
+  var rv = clienti.find(function(x){ return x.id === cli.rivDi && x.riv; });
+  return (rv && rv.area) ? rv : null;
 }
 /* i recapiti riservati a cui arrivano gli ordini di questo cliente (rivenditore e/o noi), gia' normalizzati */
 function destinatariDi(cli){
@@ -5674,7 +5709,7 @@ function testoLink(cli, url, via){
 function datiLinkDa(url){
   var h = String(url).split("#")[1] || "", q = {};
   h.split("&").forEach(function(kv){ var k = kv.split("="); try{ q[decodeURIComponent(k[0])] = decodeURIComponent((k.slice(1).join("=")||"").replace(/\+/g, " ")); }catch(e){} });
-  return {c:q.c||"", n:q.n||"", i:q.i||"", e:q.e||"", t:q.t||"", p:q.p||"", d:q.d||""};
+  return {c:q.c||"", n:q.n||"", i:q.i||"", e:q.e||"", t:q.t||"", p:q.p||"", d:q.d||"", r:q.r||"", rn:q.rn||""};
 }
 /* Il link corto: sul telefono del cliente arriva solo sito/#k=id, i dati stanno sul
    servizio. L'id resta lo stesso anche se SER cambia sconti o email: il link gia'
@@ -7434,6 +7469,7 @@ function apriPassword(){
 function pwUguale(a, b){ return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase(); }
 function entraInGestione(){
   var div = document.getElementById("pwPanel");
+  if(RIV){ if(div) div.remove(); rivEntra(); return; }
   S.gestione = true;
   $("btnGest").setAttribute("aria-pressed","true");
   $("tabGest").hidden = false; $("tabCod").hidden = false; $("tabCom").hidden = false; $("tabMiei").hidden = false;
@@ -7725,6 +7761,7 @@ function cardCliente(c){
         + (navigator.share ? '<button class="btn sec small" type="button" data-clisharelink="'+esc(c.id)+'">Condividi il link\u2026</button>' : '')
         + '<button class="btn sec small" type="button" data-clicopialink="'+esc(c.id)+'">Copia il link</button>'
         + '<button class="btn sec small" type="button" data-cliprezzi="'+esc(c.id)+'">Prezzi suoi</button>'
+        + ((c.riv && !RIV) ? '<button class="btn sec small" type="button" data-cliarea="'+esc(c.id)+'">Area rivenditore</button>' : '')
         + '<button class="btn sec small" type="button" data-climod="'+esc(c.id)+'">Modifica</button>'
         + '<details><summary>Altro \u25be</summary><span class="altro">'
           + '<button class="btn sec small" type="button" data-cliatt="stato|'+esc(c.id)+'">Stato link</button>'
@@ -7769,6 +7806,7 @@ function salvaClienti(){
   /* dopo un salvataggio, i link corti dei clienti cambiati si aggiornano da soli (poco dopo, una volta sola) */
   if(!CLIENTE){ clearTimeout(LK_TIMER); LK_TIMER = setTimeout(function(){ if(typeof registraLinkTutti === "function") registraLinkTutti(); }, 800); }
   riallineaClienteAttivo();
+  if(RIV){ saveVero(K.clienti, clienti); rivSpingi(); return true; }
   if(!save(K.clienti, clienti)){
     var m=$("cliMsg"); m.className="msg err";
     m.textContent="Non sono riuscito a salvare l'elenco clienti: memoria del browser piena o bloccata.";
@@ -7803,7 +7841,8 @@ $("btnGenera").addEventListener("click", function(){
     clienti.unshift(nuovoCli);
   }
   var rvSalv = clienti.find(function(x){ return x.id === idSalvato; }), coll = {dentro:0, tolti:0};
-  if(rvSalv && (rvSalv.riv || primaRiv.riv)) coll = collegaSuoiClienti(rvSalv, primaRiv);
+  if(RIV && rvSalv){ rvSalv.rivDi = RIV.io.id; rvSalv.riv = false; delete rvSalv.dest; aggiungiRecapitiRiv(rvSalv, RIV.io.tel, RIV.io.mail); }
+  if(!RIV && rvSalv && (rvSalv.riv || primaRiv.riv)) coll = collegaSuoiClienti(rvSalv, primaRiv);
   if(!salvaClienti()) return;
   /* l'ordine mostra subito i numeri appena scritti. Si cerca per scheda e non
      per codice: due clienti con gli stessi sconti hanno lo stesso codice, e
@@ -7890,6 +7929,24 @@ $("elencoClienti").addEventListener("click", function(e){
         m.textContent = "Il codice di " + (cu.nome||"questo cliente") + " non e valido o e scaduto: salvalo di nuovo per rifarlo.";
       }
     }
+    return;
+  }
+  if((t = e.target.closest("[data-cliarea]"))){
+    var ca = clienti.find(function(x){ return x.id === t.getAttribute("data-cliarea"); }); if(!ca) return;
+    if(!syncCfg() || SYNC.ruolo !== "titolare"){ m.className = "msg err"; m.textContent = "Il codice dell\u2019area rivenditore lo crea solo il titolare, da un dispositivo collegato al servizio."; return; }
+    m.className = "msg"; m.textContent = "Preparo il codice dell\u2019area rivenditore\u2026";
+    /* prima si controlla che il servizio sia alla 18: una versione vecchia creerebbe un codice da collaboratore, che apre tutto */
+    fetch(syncCfg().url.replace(/\/+$/,"") + "/").then(function(r){ return r.json(); }).catch(function(){ return null; }).then(function(v){
+    if(!v || !(Number(v.versione) >= 18)){ m.className = "msg err"; m.textContent = v ? "Il servizio su Cloudflare \u00e8 alla versione " + v.versione + ": incolla la versione 18, poi riprova. Nessun codice \u00e8 stato creato." : "Il servizio non risponde, riprova."; return; }
+    syncChiama({azione:"collaboratorePut", nome:ca.nome || "Rivenditore", rivId:ca.id}, function(j){
+      if(!j || !j.ok || !j.collaboratore){ m.className = "msg err"; m.textContent = (j && j.motivo === "azione") ? "Il servizio su Cloudflare \u00e8 a una versione vecchia: incolla la versione 18." : "Il servizio non risponde, riprova."; return; }
+      if(!j.collaboratore.rivId){ m.className = "msg err"; m.textContent = "Il servizio su Cloudflare \u00e8 a una versione vecchia: incolla la versione 18, poi riprova."; return; }
+      COLLAB = j.collaboratori || COLLAB; if(typeof disegnaCollaboratori === "function") disegnaCollaboratori();
+      if(!ca.area){ ca.area = true; ca.aggiornato = new Date().toISOString(); salvaClienti(); }   // da ora i suoi clienti mandano a lui il codice di attivazione
+      apriWhatsApp(numeroWaCliente(ca.tel) || "", testoAreaRivenditore(ca.nome, j.collaboratore.codice));
+      m.className = "msg ok"; m.textContent = "Codice dell\u2019area rivenditore di " + (ca.nome || "") + ": " + j.collaboratore.codice + ". Si \u00e8 aperto WhatsApp col messaggio: premi Invia. Lo blocchi o lo rimandi da Comunicazioni \u2192 Collaboratori.";
+    });
+    });
     return;
   }
   if((t = e.target.closest("[data-cliprezzi]"))){
@@ -8815,7 +8872,7 @@ function disegnaCollaboratori(){
   var ultimo = {}; REGISTRO.forEach(function(r){ if(r.chi) ultimo[r.chi] = r.quando; });
   box.innerHTML = COLLAB.map(function(c){
     var u = ultimo[c.nome];
-    return '<div class="cliente" style="' + (c.bloccato ? 'opacity:.6' : '') + '"><span class="nm">' + esc(c.nome) + (c.bloccato ? ' <span class="hint" style="color:var(--signal);font-weight:600">bloccato</span>' : '') + '</span>'
+    return '<div class="cliente" style="' + (c.bloccato ? 'opacity:.6' : '') + '"><span class="nm">' + esc(c.nome) + (c.rivId ? ' <span class="hint" style="color:var(--accent);font-weight:600">area rivenditore</span>' : '') + (c.bloccato ? ' <span class="hint" style="color:var(--signal);font-weight:600">bloccato</span>' : '') + '</span>'
       + '<span class="az">'
       + (c.bloccato ? '<button class="btn sec small" type="button" data-colsblocca="' + esc(c.id) + '">Sblocca</button>'
                     : '<button class="btn sec small" type="button" data-colwa="' + esc(c.id) + '">Manda su WhatsApp</button><button class="btn sec small" type="button" data-colcopia="' + esc(c.id) + '">Copia il codice</button><button class="btn sec small" type="button" data-colblocca="' + esc(c.id) + '">Blocca</button>')
@@ -8835,6 +8892,11 @@ $("elencoCollaboratori").addEventListener("click", function(e){
   var id = t.getAttribute("data-colwa") || t.getAttribute("data-colcopia") || t.getAttribute("data-colblocca") || t.getAttribute("data-colsblocca") || t.getAttribute("data-colelimina");
   var c = COLLAB.find(function(x){ return x.id === id; }); if(!c) return;
   var m = $("colGestMsg");
+  if(t.hasAttribute("data-colwa") && c.rivId){
+    var rvc = clienti.find(function(x){ return x.id === c.rivId; });
+    apriWhatsApp(rvc ? (numeroWaCliente(rvc.tel) || "") : "", testoAreaRivenditore(c.nome, c.codice));
+    return;
+  }
   if(t.hasAttribute("data-colwa")){
     apriWhatsApp("", "Ciao " + c.nome + ", questo è il gestionale di " + (AZIENDA.nome || "Design Systems") + ":\n" + linkCollegaTel(c.codice) + "\n\n"
       + "Sull’iPhone aprilo con Safari e aggiungilo alla schermata Home (Condividi → Aggiungi alla schermata Home). Quando ti chiede la password, incolla questo codice e premi Entra:\n" + c.codice + "\n\n"
@@ -8851,6 +8913,105 @@ $("elencoCollaboratori").addEventListener("click", function(e){
   if(t.hasAttribute("data-colsblocca")){ chiamaCollab({azione:"collaboratoreBlocca", id:c.id, bloccato:false}, function(){ m.className = "msg ok"; m.textContent = c.nome + " sbloccato: il suo codice vale di nuovo."; }); return; }
   if(t.hasAttribute("data-colelimina")){ attendiConferma(t, "Elimino " + c.nome + "?", function(){ chiamaCollab({azione:"collaboratoreElimina", id:c.id}, function(){ m.className = "msg ok"; m.textContent = c.nome + " eliminato: il suo codice non vale più."; }); }); }
 });
+/* ------------------------------------------------------------------
+   SER 10/11: AREA RIVENDITORE
+   Il rivenditore entra nel gestionale del telefono con il suo codice (RIV-...): vede SOLO i suoi clienti,
+   li registra, fa sconti e listini con i suoi prezzi, manda i link, approva le attivazioni e vede i loro
+   ordini. Il servizio gli manda solo i suoi clienti e salva solo quelli (azioni rivDati/rivClientePut/rivClienteDel);
+   il listino di partenza e' quello pubblicato sul sito. Nel gestionale di Design Systems tutto resta visibile.
+   ------------------------------------------------------------------ */
+function testoAreaRivenditore(nome, codice){
+  return "Ciao " + (nome || "") + ", questa \u00e8 la tua area rivenditore " + (AZIENDA.nome || "Design Systems") + ": qui registri i tuoi clienti, gli fai sconti e listini, mandi i loro link personali, approvi le loro attivazioni e vedi i loro ordini.\n"
+    + linkCollegaTel(codice) + "\n\n"
+    + "Sull\u2019iPhone aprila con Safari e aggiungila alla schermata Home (Condividi \u2192 Aggiungi alla schermata Home). Quando ti chiede la password, incolla questo codice e premi Entra:\n" + codice + "\n\n"
+    + "Il codice \u00e8 solo tuo: non girarlo a nessuno.";
+}
+function rivAvvia(j, poi){
+  SYNC.attiva = false; SYNC.pronto = true; SYNC.ruolo = "rivenditore"; SYNC.nome = j.nome || "";
+  if(SYNC.poll){ clearInterval(SYNC.poll); SYNC.poll = null; }
+  RIV = {id:j.rivId, nome:j.nome || "", io:{id:j.rivId, nome:j.nome || "", tel:"", mail:"", lk:""}, server:{}, gen:null, errore:""};
+  document.body.classList.add("rivenditore");
+  syncChiama({azione:"rivDati"}, function(d){
+    if(!d || !d.ok){ RIV.errore = "Il servizio non risponde: riprova fra poco."; poi(); return; }
+    RIV.io = d.io || RIV.io; RIV.io.id = RIV.io.id || j.rivId;
+    if(d.base) saveVero(K.base, d.base);
+    clienti = d.clienti || []; saveVero(K.clienti, clienti);
+    RIV.server = {}; clienti.forEach(function(c){ RIV.server[c.id] = JSON.stringify(c); });
+    var cart = cartellaSito() || (/^https?:/.test(location.protocol) ? new URL("../", location.href).href : "");
+    if(!cart){ RIV.errore = "Non trovo il listino sul sito."; poi(); return; }
+    fetch(cart + "dati.json?v=" + Date.now(), {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(dj){
+      if(dj && dj.listino && Array.isArray(dj.listino.gruppi) && dj.listino.gruppi.length){
+        cliListino = null; LISTINO_GEN = null;
+        listino = normalizza(dj.listino); RIV.gen = clone(listino);
+        if(Array.isArray(dj.prodExtra)){ PRODOTTI_EXTRA = dj.prodExtra.slice(); PRODOTTI_TUTTI = PRODOTTI_BASE.concat(PRODOTTI_EXTRA); }
+        PREZZI_GEN = prezziCompleti(listino);
+        if(!listino.gruppi.some(function(g){ return g.id === S.gruppo; })) S.gruppo = listino.gruppi[0].id;
+        if(!gruppoCorrente().varianti.some(function(v){ return v.id === S.variante; })) S.variante = gruppoCorrente().varianti[0].id;
+      } else RIV.errore = "Il listino sul sito non \u00e8 leggibile.";
+      poi();
+    }).catch(function(){ RIV.errore = "Non riesco a scaricare il listino dal sito."; poi(); });
+  });
+}
+function rivEntra(){
+  S.gestione = true;
+  $("btnGest").setAttribute("aria-pressed","true");
+  $("tabGest").hidden = true; $("tabCom").hidden = true; $("tabMiei").hidden = true; $("tabCod").hidden = false;
+  var tc = $("tabCod"); if(tc.firstChild && tc.firstChild.nodeType === 3) tc.firstChild.nodeValue = "I miei clienti ";
+  $("ordiniDescr").textContent = "Gli ordini dei tuoi clienti, numerati in sequenza, con il PDF firmato.";
+  var box = document.getElementById("rivTesta");
+  if(!box){
+    box = document.createElement("div"); box.className = "card"; box.id = "rivTesta"; box.style.borderColor = "var(--accent)";
+    $("vCod").insertBefore(box, $("vCod").firstChild);
+  }
+  box.innerHTML = '<h2>Area rivenditore \u00b7 ' + esc(RIV.io.nome || RIV.nome || "") + '</h2>'
+    + '<p style="font-size:13.5px;line-height:1.5;margin:0 0 10px">Qui registri i tuoi clienti e gli fai sconti e listini (\u00abPrezzi suoi\u00bb apre il suo listino: cambi i prezzi e restano solo suoi), mandi i loro link, approvi le attivazioni dei loro telefoni e vedi i loro ordini.</p>'
+    + (RIV.io.lk ? '<div class="btnrow"><a class="btn sec small" href="' + esc(RIV.io.lk) + '" target="_blank" rel="noopener">Il mio listino per i miei acquisti</a></div>' : '')
+    + (RIV.errore ? '<p class="msg err">' + esc(RIV.errore) + '</p>' : '')
+    + '<p class="msg" id="rivMsg"></p>';
+  disegna(); disegnaGenSconti(); disegnaClienti();
+  if(typeof disegnaRichieste === "function") disegnaRichieste();
+  if(typeof avviaControlloOrdini === "function") avviaControlloOrdini();
+  mostraVista("cod"); disegnaOrdiniRicevuti();
+  if(!RIV.poll) RIV.poll = setInterval(rivControlla, 60000);
+}
+/* ogni minuto: se Design Systems ha bloccato il codice, l'area si svuota (accessoTolto, come per i collaboratori) */
+function rivControlla(){ if(RIV) syncChiama({azione:"statoQuando"}, function(){}); }
+/* i clienti cambiati sul telefono del rivenditore vanno al servizio, uno alla volta */
+var RIV_CODA = false, RIV_ANCORA = false;
+function rivSpingi(){
+  if(!RIV) return;
+  if(RIV_CODA){ RIV_ANCORA = true; return; }
+  var lavori = [];
+  clienti.forEach(function(c){ if(RIV.server[c.id] !== JSON.stringify(c)) lavori.push({az:"rivClientePut", c:c}); });
+  Object.keys(RIV.server).forEach(function(id){ if(!clienti.some(function(c){ return c.id === id; })) lavori.push({az:"rivClienteDel", id:id}); });
+  if(!lavori.length) return;
+  RIV_CODA = true;
+  var m = document.getElementById("rivMsg") || $("cliMsg"), ultimo = null, errori = 0;
+  m.className = "msg"; m.textContent = "Salvo sul servizio\u2026";
+  (function prossimo(){
+    var w = lavori.shift();
+    if(!w){
+      RIV_CODA = false;
+      if(ultimo){
+        var locali = clienti;
+        clienti = ultimo.map(function(sc){ return sc; });
+        locali.forEach(function(lc){ if(!clienti.some(function(x){ return x.id === lc.id; }) && !RIV.server[lc.id] && errori) clienti.push(lc); });   // quelli non riusciti restano qui
+        RIV.server = {}; ultimo.forEach(function(c){ RIV.server[c.id] = JSON.stringify(c); });
+        saveVero(K.clienti, clienti);
+        riallineaClienteAttivo(); disegnaClienti(); disegnaBarraCli();
+      }
+      m.className = errori ? "msg err" : "msg ok";
+      m.textContent = errori ? "Non tutto \u00e8 stato salvato sul servizio: controlla la connessione e riprova." : "Salvato.";
+      if(RIV_ANCORA){ RIV_ANCORA = false; rivSpingi(); }
+      return;
+    }
+    var corpo = w.az === "rivClientePut" ? {azione:w.az, cliente:w.c} : {azione:w.az, id:w.id};
+    syncChiama(corpo, function(j){
+      if(j && j.ok && Array.isArray(j.clienti)) ultimo = j.clienti; else errori++;
+      prossimo();
+    });
+  })();
+}
 function disegnaRegistro(){
   var box = $("elencoRegistro"), chi = $("regChi").value;
   var lista = REGISTRO.slice().reverse().filter(function(r){ return !chi || r.chi === chi; });
@@ -9384,12 +9545,12 @@ function testoRifiuto(motivo){
   function mostraAttesa(tel, codice){
     LINK_CLI.inAttesa = {tel:tel, codice:codice}; save(K.link, LINK_CLI);
     box.querySelector("h3").textContent = "Un ultimo passaggio";
-    box.querySelector("p.corpo").innerHTML = "Manda questo codice su WhatsApp a " + esc(AZIENDA.nome || "Design Systems")
+    box.querySelector("p.corpo").innerHTML = "Manda questo codice su WhatsApp a " + esc((LINK_CLI.rivWa && LINK_CLI.rivNome) || AZIENDA.nome || "Design Systems")
       + ": appena arriva dal tuo numero, il listino si attiva da solo.<br>"
       + '<span style="display:inline-block;margin:8px 0;font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:.12em">' + esc(codice) + '</span>';
     var row = box.querySelector(".btnrow"); row.hidden = false;
     var msgWa = T("Attivazione app Preventivi Pavimenti") + " \u2014 " + (LINK_CLI.nome || "") + " \u2014 " + T("codice") + " " + codice;
-    row.innerHTML = '<a class="btn small" id="btnMandaCodice"' + (suTelefono() ? '' : ' target="_blank" rel="noopener"') + ' href="' + esc(linkWhatsApp(numeroWa(AZIENDA.wa), msgWa)) + '">Manda il codice su WhatsApp</a>'
+    row.innerHTML = '<a class="btn small" id="btnMandaCodice"' + (suTelefono() ? '' : ' target="_blank" rel="noopener"') + ' href="' + esc(linkWhatsApp(numeroWa(LINK_CLI.rivWa) || numeroWa(AZIENDA.wa), msgWa)) + '">Manda il codice su WhatsApp</a>'
       + '<button class="btn sec small" type="button" id="btnRicontrolla">Ho mandato il codice</button>';
     m.className = "msg"; m.textContent = "In attesa dell\u2019approvazione di " + (AZIENDA.nome || "Design Systems") + "\u2026 (controllo da solo ogni 10 secondi)";
     document.getElementById("btnRicontrolla").addEventListener("click", function(){ finisci(tel, true); });
@@ -10211,8 +10372,9 @@ function agganciaSchedeDiFabbrica(){
    salvata; il servizio tiene la versione precedente (statoPrecedente).
    ============================================================ */
 var SYNC_K = "pavpro.sync.v1";
+var RIV = null;   /* SER 10/11: area rivenditore: {id, nome, io:{id,nome,tel,mail,lk}, server:{id:json}, gen:listino} */
 var SYNC = { pronto:false, attiva:false, quando:null, sporco:false, sporcoPre:false, timer:null, inCorso:false, attPend:{}, poll:null, msg:"", errore:"" };
-var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1 };
+var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1, "pavpro.modifiche.backup.v1":1, "pavpro.sync.incompleta.v1":1 };
 function syncChiave(k){ return !!k && k.indexOf("pavpro.") === 0 && !SYNC_ESCLUSE[k] && k.indexOf(K.attPre) !== 0; }
 function syncStatoLocale(){
   var d = {};
@@ -10243,6 +10405,7 @@ function accessoTolto(){
     var via = []; for(var i = 0; i < localStorage.length; i++){ var k = localStorage.key(i); if(syncChiave(k)) via.push(k); }
     via.forEach(function(k){ localStorage.removeItem(k); });
     localStorage.removeItem(K.att); localStorage.removeItem(SYNC_K); localStorage.removeItem("pavpro.sync.impronta.v1");
+    localStorage.removeItem(K.modBak); localStorage.removeItem("pavpro.sync.incompleta.v1");   // anche la copia di sicurezza del listino, che resta solo sul dispositivo
   }catch(e){}
   try{ var t = attTutti(); for(var u in t) attDelVero(u); }catch(e){}
   syncBaseSalva(null);
@@ -10253,7 +10416,7 @@ function syncMarca(){ return load(SYNC_K, {quando:null, sporco:false}); }
 function syncSalvaMarca(){ saveVero(SYNC_K, {quando:SYNC.quando, sporco:SYNC.sporco}); }
 /* ogni salvataggio della gestione: segna e, fra qualche secondo, manda */
 function syncSegna(){
-  if(CLIENTE) return;
+  if(CLIENTE || RIV) return;
   if(!SYNC.pronto){ SYNC.sporcoPre = true; return; }
   if(!SYNC.sporco){ SYNC.sporco = true; syncSalvaMarca(); }
   if(SYNC.timer) clearTimeout(SYNC.timer);
@@ -10491,8 +10654,10 @@ function righeConflitti(conf, dati){
 }
 /* manda al servizio: prima le schede cambiate, poi la memoria */
 function syncSpingi(forza){
-  if(!SYNC.attiva || !SYNC.pronto) return;
+  if(!SYNC.attiva || !SYNC.pronto || RIV || SYNC.incompleta) return;
   if(SYNC.inCorso){ SYNC.sporco = true; return; }
+  var manca0 = memoriaMancante(syncStatoLocale());
+  if(manca0.length){ memoriaIncompleta(manca0); return; }
   SYNC.inCorso = true; SYNC.msg = "salvo sul servizio…"; syncDisegna();
   var tutti = attTutti();
   if(!SYNC.quando){ for(var u0 in tutti) if(/^data:/i.test(String(tutti[u0])) || String(tutti[u0]).length > 400) SYNC.attPend[u0] = 1; }   /* prima volta: tutti i PDF */
@@ -10514,6 +10679,8 @@ function syncSpingi(forza){
         if(SYNC.sporco && !SYNC.timer) SYNC.timer = setTimeout(function(){ SYNC.timer = null; syncSpingi(false); }, 6000);
       } else if(j && j.motivo === "vecchia"){
         copiaVecchia(j.rev); return;
+      } else if(j && j.motivo === "incompleto"){
+        memoriaIncompleta(j.mancano || []); return;
       } else if(j && j.motivo === "conflitto"){
         /* un altro ha salvato nel frattempo: si uniscono le due versioni (restano le modifiche di tutti) */
         syncUnisci(0); return;
@@ -10572,8 +10739,29 @@ function syncUnisci(tentativo){
 /* prende dal servizio e riparte con quella memoria.
    mie (facoltativo): la memoria locale da cui si e' partiti per unire; si riscrivono solo le chiavi che
    sono cambiate rispetto a lei, cosi' quello che hai scritto nel frattempo non si perde */
+function scriviChiave(k, v){ try{ localStorage.setItem(k, v); if(localStorage.getItem(k) !== v) throw new Error("non scritta"); }catch(e){ nonScritte.push(k); } }
+var nonScritte = [];
+/* la memoria di questo dispositivo non contiene tutto: niente salvataggi sul servizio, finche' non si sistema */
+function memoriaIncompleta(chiavi){
+  SYNC.attiva = false; SYNC.incompleta = true; if(SYNC.timer){ clearTimeout(SYNC.timer); SYNC.timer = null; } if(SYNC.poll){ clearInterval(SYNC.poll); SYNC.poll = null; }
+  SYNC.errore = "la memoria di questo dispositivo \u00e8 piena: non riesce a tenere tutti i dati del gestionale, quindi da qui non salvo niente sul servizio. Usa il Mac, oppure libera spazio e ricollega il dispositivo.";
+  try{ localStorage.setItem("pavpro.sync.incompleta.v1", JSON.stringify({quando:new Date().toISOString(), chiavi:(chiavi || []).slice(0, 20)})); }catch(e){}
+  try{ syncDisegna(); avvisoMemoriaIncompleta(); }catch(e){}
+}
+function avvisoMemoriaIncompleta(){
+  if(document.getElementById("memIncompleta")) return;
+  var d = document.createElement("div"); d.className = "card"; d.id = "memIncompleta"; d.style.borderColor = "#b3261e";
+  d.innerHTML = '<h3 style="margin:0 0 6px">Memoria di questo dispositivo piena</h3><p class="corpo" style="margin:0">Il gestionale non \u00e8 riuscito a tenere qui tutti i dati: per non rovinare quelli buoni, da questo dispositivo <b>non si salva niente</b> sul servizio. Lavora dal Mac; su questo telefono libera spazio (Impostazioni \u2192 Safari \u2192 Avanzate \u2192 Dati dei siti web) e ricollegalo col codice.</p>';
+  var v = document.getElementById("vPrev"); if(v) v.insertBefore(d, v.firstChild);
+}
+/* prima di mandare: se mancano dati che il servizio aveva (clienti, listino, password, sito, elenco prodotti), non si manda niente */
+function memoriaMancante(dati){
+  var b = (SYNC.base && SYNC.base.dati) || null; if(!b) return [];
+  return [K.clienti, K.mod, K.prodExtra, K.pw, K.base].filter(function(k){ return b[k] !== undefined && dati[k] === undefined; });
+}
 function syncApplica(stato, poi, mie){
   var dati = stato.dati || {}, idx = stato.allegati || {}, miei = attTutti(), daPrendere = [], u;
+  nonScritte = [];
   for(u in idx){
     if(miei[u] && syncVoceUguale(miei[u], idx[u])) continue;
     if(idx[u].charAt(0) === "=") attSetVero(u, idx[u].slice(1)); else daPrendere.push(u);
@@ -10587,13 +10775,18 @@ function syncApplica(stato, poi, mie){
         if(mie){
           var ora = syncStatoLocale(); nelFrattempo = !stessi(ora, mie);
           var tutte = {}, k0; for(k0 in dati) tutte[k0] = 1; for(k0 in mie) tutte[k0] = 1;
-          for(k0 in tutte){ if(!syncChiave(k0) || dati[k0] === mie[k0]) continue; if(dati[k0] === undefined) localStorage.removeItem(k0); else localStorage.setItem(k0, dati[k0]); }
+          for(k0 in tutte){ if(!syncChiave(k0) || dati[k0] === mie[k0]) continue; if(dati[k0] === undefined) localStorage.removeItem(k0); else scriviChiave(k0, dati[k0]); }
         } else {
           var vecchie = []; for(var n=0;n<localStorage.length;n++){ var k = localStorage.key(n); if(syncChiave(k)) vecchie.push(k); }
           vecchie.forEach(function(k){ localStorage.removeItem(k); });
-          for(var k2 in dati) if(syncChiave(k2)) localStorage.setItem(k2, dati[k2]);
+          try{ localStorage.removeItem("pavpro.modifiche.backup.v1"); }catch(e1){}   // la copia di sicurezza si rifa' al primo salvataggio: prima serve spazio per i dati veri
+          Object.keys(dati).filter(syncChiave).sort(function(a, b){ return String(dati[a]).length - String(dati[b]).length; }).forEach(function(k2){ scriviChiave(k2, dati[k2]); });
         }
-      }catch(e){}
+      }catch(e){ nonScritte.push("?"); }
+      /* SER 10/11: se il telefono non ha spazio per tutta la memoria, NON deve mai mandarla al servizio:
+         una copia incompleta salvata sopra a quella buona aveva cancellato clienti e password */
+      if(nonScritte.length){ memoriaIncompleta(nonScritte); }
+      else { try{ localStorage.removeItem("pavpro.sync.incompleta.v1"); }catch(e3){} }
       SYNC.quando = stato.quando; SYNC.sporco = nelFrattempo; syncSalvaMarca();
       if(!mie) syncBaseSalva({quando:stato.quando, dati:dati, allegati:idx});
       try{ saveVero("pavpro.sync.impronta.v1", nelFrattempo ? "" : syncImprontaStato(dati, idx)); }catch(e){}   /* dopo il ricaricamento: niente rimandi a vuoto */
@@ -10640,6 +10833,13 @@ function syncControlla(){
 }
 function syncAvvio(poi){
   if(CLIENTE || !MEMORIA_OK){ SYNC.pronto = true; poi(); return; }
+  if(load("pavpro.sync.incompleta.v1", null) && syncCfg()){
+    /* una volta per sessione si riprova a prendere tutta la memoria (per esempio dopo aver liberato spazio) */
+    SYNC.pronto = true; var giaProvato = false;
+    try{ giaProvato = sessionStorage.getItem("pavpro.riprova") === "1"; sessionStorage.setItem("pavpro.riprova", "1"); }catch(e){}
+    if(!giaProvato){ syncChiama({azione:"statoGet"}, function(j){ if(j && j.ok && j.stato) syncApplica(j.stato, function(){ if(!SYNC.incompleta) syncRicarica(); else poi(); }); else { memoriaIncompleta([]); poi(); } }); return; }
+    memoriaIncompleta([]); poi(); return;
+  }
   var m = syncMarca(); SYNC.quando = m.quando; SYNC.sporco = !!m.sporco; SYNC.impronta = load("pavpro.sync.impronta.v1", null);
   if(!syncCfg()){ SYNC.pronto = true; syncDisegna(); poi(); return; }
   SYNC.attiva = true;
@@ -10655,6 +10855,7 @@ function syncAvvioDopoBase(poi, giaRicaricato){
   };
   syncChiama({azione:"statoQuando"}, function(j){
     if(!j || !j.ok){ SYNC.errore = (j && j.motivo === "chiave") ? "parola d’ordine sbagliata" : (j && j.motivo === "azione") ? "il servizio è ancora alla versione 8: va aggiornato" : "servizio non raggiungibile"; fine(); return; }
+    if(j.ruolo === "rivenditore"){ rivAvvia(j, poi); return; }
     SYNC.ruolo = j.ruolo || "titolare"; SYNC.nome = j.nome || "";
     if(typeof disegnaCollaboratoriCard === "function") disegnaCollaboratoriCard();
     if(j.rev && j.rev > APP_REV){ SYNC.pronto = true; copiaVecchia(j.rev); poi(); return; }   // copia vecchia: non salva niente
@@ -10678,7 +10879,7 @@ function syncDisegna(){
     + " · questo dispositivo: " + syncDispositivo() + (SYNC.ruolo === "collaboratore" ? " · collegato come collaboratore: " + SYNC.nome : "");
 }
 document.addEventListener("visibilitychange", function(){ if(document.hidden && SYNC.timer && SYNC.attiva){ clearTimeout(SYNC.timer); SYNC.timer = null; syncSpingi(false); } });   /* si cambia app sul telefono: manda subito */
-window.addEventListener("beforeunload", function(){ if(SYNC.timer && SYNC.attiva){ clearTimeout(SYNC.timer); SYNC.timer = null; try{ var a = syncCfg(); if(a && navigator.sendBeacon) var dB = syncStatoLocale(), iB = syncIndiceAllegati(), rB = []; try{ rB = SYNC.base ? righeModifiche(SYNC.base.dati || {}, dB, SYNC.base.allegati || {}, iB) : []; }catch(e2){} navigator.sendBeacon(a.url.replace(/\/+$/,"") + "/admin", new Blob([JSON.stringify({chiave:a.chiave, azione:"statoPut", base:SYNC.quando, da:syncDispositivo(), rev:APP_REV, dati:dB, allegati:iB, modifiche:rB})], {type:"application/json"}));   /* se un altro ha salvato nel frattempo il servizio dice no: alla prossima apertura si uniscono */ }catch(e){} } });
+window.addEventListener("beforeunload", function(){ if(SYNC.timer && SYNC.attiva && !SYNC.incompleta && !memoriaMancante(syncStatoLocale()).length){ clearTimeout(SYNC.timer); SYNC.timer = null; try{ var a = syncCfg(); if(a && navigator.sendBeacon) var dB = syncStatoLocale(), iB = syncIndiceAllegati(), rB = []; try{ rB = SYNC.base ? righeModifiche(SYNC.base.dati || {}, dB, SYNC.base.allegati || {}, iB) : []; }catch(e2){} navigator.sendBeacon(a.url.replace(/\/+$/,"") + "/admin", new Blob([JSON.stringify({chiave:a.chiave, azione:"statoPut", base:SYNC.quando, da:syncDispositivo(), rev:APP_REV, dati:dB, allegati:iB, modifiche:rB})], {type:"application/json"}));   /* se un altro ha salvato nel frattempo il servizio dice no: alla prossima apertura si uniscono */ }catch(e){} } });
 if(CLIENTE){
   archivioCarica(function(){ disegnaMieiOrdini(); });
 }
@@ -10871,7 +11072,7 @@ traduciPagina();
     return fetch(d.attivaUrl.replace(/\/+$/, "") + "/link/" + mk[2], {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(j){
       if(!j || !j.ok || !j.dati || !j.dati.c) return "vecchio";
       var q = j.dati, h = "#c=" + encodeURIComponent(q.c) + "&n=" + encodeURIComponent(q.n||"") + "&i=" + encodeURIComponent(q.i||"")
-        + (q.e ? "&e=" + encodeURIComponent(q.e) : "") + (q.t ? "&t=" + q.t : "") + (q.p ? "&p=" + q.p : "") + (q.d ? "&d=" + q.d : "") + "&k=" + mk[2];
+        + (q.e ? "&e=" + encodeURIComponent(q.e) : "") + (q.t ? "&t=" + q.t : "") + (q.p ? "&p=" + q.p : "") + (q.d ? "&d=" + q.d : "") + (q.r ? "&r=" + q.r : "") + (q.rn ? "&rn=" + encodeURIComponent(q.rn) : "") + "&k=" + mk[2];
       history.replaceState(null, "", location.pathname + location.search + h);
       return "";
     }).catch(function(){ return "rete"; });
