@@ -842,7 +842,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110114402";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110124521";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1573,6 +1573,7 @@ if(CLIENTE && DATI && DATI.cliente && DATI.cliente.code){
 }
 
 var sel = load(K.sel, null) || {};
+var VISTA_STESSA_APERTURA = (function(){ try{ var gia = sessionStorage.getItem("pavpro.aperta") === "1"; sessionStorage.setItem("pavpro.aperta", "1"); return gia; }catch(e){ return false; } })();
 var RIPRENDI_ORDINE = !!load("pavpro.ordmod.v1", null);
 var S = {
   gruppo: sel.gruppo || listino.gruppi[0].id,
@@ -1600,7 +1601,9 @@ var S = {
   colpct: (sel.colpct && typeof sel.colpct==="object") ? sel.colpct : {},  // uid -> {colore: % nell'impasto}
   cons: (RIPRENDI_ORDINE && sel.cons && typeof sel.cons==="object") ? sel.cons : {},    // uid -> consumo scelto
   spessore: (sel.spessore && typeof sel.spessore==="object") ? sel.spessore : {},  // sistema -> spessore scelto (cm)
-  vista: (sel.vista === "cliente" || sel.vista === "niente") ? sel.vista : "tutto",   // cosa si vede dei prezzi
+  /* SER 10/11: "Niente prezzi" / "Totale per il mio cliente" valgono finche' l'app resta aperta: a ogni nuova apertura si riparte
+     da "I miei prezzi" (prima restava nascosto per sempre, e sembrava sparito tutto il riepilogo dell'ordine) */
+  vista: (VISTA_STESSA_APERTURA && (sel.vista === "cliente" || sel.vista === "niente")) ? sel.vista : "tutto",   // cosa si vede dei prezzi
   ricarico: (typeof sel.ricarico === "number" && sel.ricarico >= 0) ? sel.ricarico : 20,   // % sul totale per il cliente dell'applicatore
   /* SER 07/11 sera: spunte, consumi e confezioni dei sottofondi tornano SEMPRE come nel listino a ogni apertura
      (il cliente puo' cambiarli mentre lavora, ma alla riapertura valgono quelli di Design Systems);
@@ -4418,6 +4421,11 @@ function disegnaVista(r){
   document.body.classList.toggle("vista-niente", v === "niente");
   var cv = $("cardVista"); if(!cv) return;
   cv.hidden = !!S.gestione;
+  /* con i prezzi nascosti il riquadro resta aperto e lo dice nel titolo: si vede subito come tornare ai prezzi */
+  var sm = cv.querySelector("summary"), chip = cv.querySelector('[data-vista="' + v + '"]');
+  if(sm) sm.textContent = T("Mostra") + (v !== "tutto" && chip ? " \u00b7 " + chip.textContent : "");
+  if(v !== "tutto" && !cv.__apertoDaMe){ cv.open = true; cv.__apertoDaMe = true; }
+  if(v === "tutto") cv.__apertoDaMe = false;
   cv.querySelectorAll("[data-vista]").forEach(function(b){ b.setAttribute("aria-pressed", String(b.getAttribute("data-vista") === v)); });
   $("ricaricoBox").hidden = v !== "cliente";
   $("cardTotCliente").hidden = v !== "cliente";
