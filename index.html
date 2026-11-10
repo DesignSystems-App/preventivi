@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110194742";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110210000";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -2267,10 +2267,12 @@ function listinoNettoRiv(riv){
   return l;
 }
 /* tutti i prezzi del cliente del rivenditore: netto del rivenditore + ricarico */
-function vociClienteRiv(riv, ricarico){
+function vociClienteRiv(riv, cli){
   var l = listinoNettoRiv(riv); if(!l) return null;
-  var r = Math.max(0, Number(ricarico) || 0);
-  if(r) scorriVoci(l, function(c){ moltiplicaPrezzi(c, 1 + r / 100); });
+  if(firmaRicarichi(cli)) l.gruppi.forEach(function(g){ (g.varianti||[]).forEach(function(v){ (v.voci||[]).forEach(function(c){
+    var r = ricaricoDi(cli, g.id, c.nome, c.uid);
+    if(r > 0) moltiplicaPrezzi(c, 1 + r / 100);
+  }); }); });
   return prezziCompleti(l);
 }
 /* prima di salvare il listino generale: ogni prezzo che cambia nel generale e che un cliente con listino suo
@@ -2420,7 +2422,7 @@ function apriListinoDi(id){
   var c = id ? clienti.find(function(x){ return x.id === id; }) : null;
   if(c){
     cliListino = c.id;
-    var vRiv = (!haListinoSuo(c) && rivDelCliente(c)) ? vociClienteRiv(rivDelCliente(c), c.ricarico) : null;   // SER 10/11 sera
+    var vRiv = (!haListinoSuo(c) && rivDelCliente(c)) ? vociClienteRiv(rivDelCliente(c), c) : null;   // SER 10/11 sera
     listino = normalizza(applicaVociCliente(clone(LISTINO_GEN), vRiv || c.voci));
   } else {
     cliListino = null;
@@ -7667,7 +7669,7 @@ $("btnPw").addEventListener("click", function(){
 
 /* ---- generatore codici ---- */
 function collegaBozzaCliente(){
-  var campi = ["genNome","genDitta","genRicarico","genNote","genBase","genScad"];
+  var campi = ["genNome","genDitta","genNote","genBase","genScad"];
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++) campi.push("gs"+i);
   for(var j=0;j<PRODOTTI_TUTTI.length;j++) campi.push("ps"+j);
   campi.forEach(function(id){
@@ -7681,7 +7683,7 @@ function disegnaGenSconti(){
   if(!box.childElementCount){
     box.innerHTML = LISTINO_BASE.gruppi.map(function(g, i){
       return '<div><label class="l" for="gs'+i+'">'+esc(g.nome)+'</label>'
-           + '<input id="gs'+i+'" type="number" min="0" max="99" step="1" placeholder="base" inputmode="decimal"></div>';
+           + '<input id="gs'+i+'" type="text" maxlength="6" autocomplete="off" placeholder="base" inputmode="decimal"></div>';
     }).join("");
   }
   var bp = $("genProdotti");
@@ -7696,7 +7698,7 @@ function disegnaGenSconti(){
     vis.push(nome);
     return '<div><label class="l" for="ps'+i+'">'+esc(nome)
          + (i >= PRODOTTI_BASE.length ? ' <span class="miotag">tuo</span>' : '') + '</label>'
-         + '<input id="ps'+i+'" type="number" min="0" max="99" step="1" placeholder="\u2014" inputmode="decimal"></div>';
+         + '<input id="ps'+i+'" type="text" maxlength="6" autocomplete="off" placeholder="\u2014" inputmode="decimal"></div>';
   }).join("");
   var firma = vis.join("\u0001");
   if(bp.dataset.firma !== firma){
@@ -7718,46 +7720,87 @@ var cliInModifica = null;
    scadenza e prezzi di quello scelto; cambia solo l'intestazione. */
 var riusaDa = null;   // {id, nome} del cliente di partenza, finche' non si salva
 
+/* SER 10/11 notte: nelle caselle degli sconti di un cliente di un rivenditore si scrive anche il ricarico:
+   "+20" = ricarico del 20% sul prezzo netto del rivenditore; "10" (o "-10") = sconto del 10%; "0" = ne' l'uno ne' l'altro.
+   Vale per la casella base, per sistema e per prodotto (la piu' precisa batte le altre, come per gli sconti). */
+function leggiPercento(v){
+  v = String(v == null ? "" : v).trim().replace(/%$/, "").replace(",", ".").replace(/^[\u2212\u2013\u2014]/, "-").trim();
+  if(v === "") return null;
+  var piu = v.charAt(0) === "+";
+  var n = Number(v.replace(/^[+\-]\s*/, ""));
+  if(!isFinite(n) || n < 0 || !/^[+\-]?\s*[0-9.]+$/.test(v)) return {err:true};
+  return {ric:piu && n > 0, val:Math.round(n)};
+}
 function leggiModulo(){
-  var base = Math.round(Number($("genBase").value));
-  if(!(base>=0 && base<=99)) return {err:"Lo sconto base deve stare fra 0 e 99."};
-  var ecc = [];
+  var conRiv = !!(RIV || $("genRivDi").value) && !$("genRiv").checked;
+  var soloRiv = "Il ricarico (+) vale solo per i clienti di un rivenditore: per gli altri scrivi lo sconto, senza il +.";
+  var b0 = leggiPercento($("genBase").value);
+  if(!b0 || b0.err) return {err:"Scrivi lo sconto base (da 0 a 99)" + (conRiv ? " oppure il ricarico, per esempio +20." : ".")};
+  if(b0.ric && !conRiv) return {err:soloRiv};
+  if(b0.ric ? b0.val > 500 : b0.val > 99) return {err:b0.ric ? "Il ricarico deve stare fra +1 e +500." : "Lo sconto base deve stare fra 0 e 99."};
+  var base = b0.ric ? 0 : b0.val, ricarico = b0.ric ? b0.val : 0;
+  var ecc = [], ricEcc = [];
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++){
-    var el = $("gs"+i); if(!el || el.value==="") continue;
-    var val = Math.round(Number(el.value));
-    if(!(val>=0 && val<=99)) return {err:"Sconto non valido su "+LISTINO_BASE.gruppi[i].nome+"."};
-    if(val !== base) ecc.push({idx:i, val:val});
+    var el = $("gs"+i); if(!el || el.value.trim()==="") continue;
+    var q = leggiPercento(el.value), nomeG = LISTINO_BASE.gruppi[i].nome;
+    if(!q || q.err || (q.ric ? q.val > 500 : q.val > 99)) return {err:"Sconto non valido su "+nomeG+"."};
+    if(q.ric && !conRiv) return {err:soloRiv};
+    if(q.ric){ if(q.val === ricarico) continue; ecc.push({idx:i, val:0}); ricEcc.push({idx:i, val:q.val}); }
+    else if(q.val !== base || ricarico) ecc.push({idx:i, val:q.val});
   }
-  var eccP = [];
+  var eccP = [], ricEccP = [];
   for(var j=0;j<PRODOTTI_TUTTI.length;j++){
     /* i prodotti spariti dal listino non hanno la casella: si saltano */
-    var ep = document.getElementById("ps"+j); if(!ep || ep.value==="") continue;
-    var pv = Math.round(Number(ep.value));
-    if(!(pv>=0 && pv<=99)) return {err:"Sconto non valido su "+PRODOTTI_TUTTI[j]+"."};
-    eccP.push({idx:j, val:pv});
+    var ep = document.getElementById("ps"+j); if(!ep || ep.value.trim()==="") continue;
+    var qp = leggiPercento(ep.value);
+    if(!qp || qp.err || (qp.ric ? qp.val > 500 : qp.val > 99)) return {err:"Sconto non valido su "+PRODOTTI_TUTTI[j]+"."};
+    if(qp.ric && !conRiv) return {err:soloRiv};
+    if(qp.ric){ eccP.push({idx:j, val:0}); ricEccP.push({idx:j, val:qp.val}); }
+    else eccP.push({idx:j, val:qp.val});
   }
   var scad = $("genScad").value || null;
   if(scad && new Date(scad+"T00:00:00Z").getTime() <= Date.now()) return {err:"La scadenza deve essere una data futura."};
   var destWa = righeNonVuote($("genDestWa").value), destMail = righeNonVuote($("genDestMail").value);
   for(var w = 0; w < destWa.length; w++) if(!numeroWaCliente(destWa[w])) return {err:"Numero WhatsApp per gli ordini non valido: " + destWa[w]};
   for(var e2 = 0; e2 < destMail.length; e2++) if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(destMail[e2])) return {err:"Email per gli ordini non valida: " + destMail[e2]};
-  var ric = $("genRicarico").value === "" ? 0 : Number($("genRicarico").value);
-  if(!(ric >= 0 && ric <= 500)) return {err:"Ricarico non valido: da 0 a 500%."};
-  return {nome:$("genNome").value.trim(), ditta:$("genDitta").value.trim(), ricarico:Math.round(ric * 100) / 100, note:$("genNote").value.trim(), base:base, ecc:ecc, eccP:eccP, scad:scad,
+  return {nome:$("genNome").value.trim(), ditta:$("genDitta").value.trim(), ricarico:ricarico, ricEcc:ricEcc, ricEccP:ricEccP, note:$("genNote").value.trim(), base:base, ecc:ecc, eccP:eccP, scad:scad,
           tel:$("genTel").value.trim(), mail:$("genMail").value.trim(),
           riv:$("genRiv").checked, rivDi:(!$("genRiv").checked && $("genRivDi").value) || null, dest:(destWa.length || destMail.length) ? {wa:destWa, mail:destMail} : null};
 }
 function mostraRicarico(){
   var si = !!(RIV || $("genRivDi").value) && !$("genRiv").checked;
-  $("genRicaricoBox").hidden = !si; $("genRicaricoHint").hidden = !si;
-  $("genRicaricoL").textContent = RIV ? "Ricarico % sul tuo listino" : "Ricarico % sul listino del rivenditore";
+  $("genRicaricoHint").hidden = !si;
+  $("genBaseL").textContent = si ? "Sconto o ricarico % \u2014 con il segno: \u221210 oppure +20" : "Sconto base %";
+  /* sul telefono: con il ricarico serve la tastiera che ha il + */
+  var modo = si ? "tel" : "decimal";
+  [$("genBase")].concat([].slice.call(document.querySelectorAll("#genSconti input, #genProdotti input"))).forEach(function(e){ if(e) e.setAttribute("inputmode", modo); });
+}
+/* quanto ricarico ha un cliente su un prodotto di un sistema: la voce piu' precisa vince (prodotto, poi sistema, poi base);
+   se la voce piu' precisa e' uno sconto, li' non c'e' ricarico */
+function ricaricoDi(cli, gruppoId, nome, uid){
+  if(!cli) return 0;
+  var NO = -1;
+  if(scontoDi({base:NO, ecc:[], eccP:cli.eccP || []}, gruppoId, nome, uid) !== NO){
+    var rp = scontoDi({base:NO, ecc:[], eccP:cli.ricEccP || []}, gruppoId, nome, uid); return rp === NO ? 0 : Number(rp) || 0;
+  }
+  if(scontoDi({base:NO, ecc:cli.ecc || [], eccP:[]}, gruppoId, null, null) !== NO){
+    var rs = scontoDi({base:NO, ecc:cli.ricEcc || [], eccP:[]}, gruppoId, null, null); return rs === NO ? 0 : Number(rs) || 0;
+  }
+  return Math.max(0, Number(cli.ricarico) || 0);
+}
+/* per capire se i ricarichi di una scheda sono cambiati (allora i prezzi si ricalcolano) */
+function firmaRicarichi(cli){
+  if(!cli) return "";
+  var r = Number(cli.ricarico) || 0, a = cli.ricEcc || [], b = cli.ricEccP || [];
+  if(!r && !a.length && !b.length) return "";
+  var ord = function(l){ return (l || []).map(function(x){ return x.idx + ":" + x.val; }).sort().join(","); };
+  return r + "|" + ord(a) + "|" + ord(b) + "|" + (cli.ecc || []).map(function(x){ return x.idx; }).sort().join(",") + "|" + (cli.eccP || []).map(function(x){ return x.idx; }).sort().join(",");
 }
 function righeNonVuote(t){ return String(t||"").split(/[\n,;]+/).map(function(x){ return x.trim(); }).filter(Boolean); }
 
 function scriviModulo(c){
   $("genNome").value = c ? (c.nome||"") : "";
   $("genDitta").value = c ? (c.ditta||"") : "";
-  $("genRicarico").value = c && c.ricarico ? c.ricarico : "";
   $("genNote").value = c ? (c.note||"") : "";
   $("genTel").value = c ? (c.tel||"") : "";
   $("genMail").value = c ? (c.mail||"") : "";
@@ -7766,18 +7809,21 @@ function scriviModulo(c){
   $("genDestWa").value = c && c.dest && c.dest.wa ? c.dest.wa.join("\n") : "";
   $("genDestMail").value = c && c.dest && c.dest.mail ? c.dest.mail.join("\n") : "";
   disegnaSuoiClienti(c ? c.id : null);
-  $("genBase").value = c ? c.base : (RIV ? 0 : 20);     /* SER 10/11 sera: i clienti del rivenditore partono dal suo listino, senza sconto in piu' */
+  var conSegno = !!(c && !c.riv && (RIV || c.rivDi)), meno = function(v){ return (conSegno && Number(v) > 0) ? "-" + v : v; };
+  $("genBase").value = c ? (Number(c.ricarico) > 0 ? "+" + c.ricarico : meno(c.base)) : (RIV ? 0 : 20);     /* SER 10/11 sera: i clienti del rivenditore partono dal suo listino, senza sconto in piu' */
   mostraRicarico();
   $("genScad").value = c && c.scad ? c.scad : "";
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++){
     var el = $("gs"+i); if(!el) continue;
     var e = c && (c.ecc||[]).find(function(x){ return x.idx===i; });
-    el.value = e ? e.val : "";
+    var er = c && (c.ricEcc||[]).find(function(x){ return x.idx===i; });
+    el.value = er ? "+" + er.val : (e ? meno(e.val) : "");
   }
   for(var j=0;j<PRODOTTI_TUTTI.length;j++){
     var ep = document.getElementById("ps"+j); if(!ep) continue;
     var p = c && (c.eccP||[]).find(function(x){ return x.idx===j; });
-    ep.value = p ? p.val : "";
+    var pr = c && (c.ricEccP||[]).find(function(x){ return x.idx===j; });
+    ep.value = pr ? "+" + pr.val : (p ? meno(p.val) : "");
   }
   $("titoloCliente").textContent = c ? ("Modifica: "+(c.nome||"cliente senza nome")) : "Nuovo cliente";
   $("genOut").hidden = !(c && c.code);
@@ -7878,7 +7924,7 @@ function cardCliente(c){
           + '<button class="btn sec small" type="button" data-clidel="'+esc(c.id)+'">Elimina</button>'
         + '</span></details>'
       + '</span>'
-      + '<span class="dt">sconto base '+N(c.base)+'%'+(n ? " \u00b7 "+n+" eccezion"+(n>1?"i":"e") : "")
+      + '<span class="dt">'+(Number(c.ricarico) > 0 ? 'ricarico +'+N(c.ricarico)+'%' : 'sconto base '+N(c.base)+'%')+(n ? " \u00b7 "+n+" eccezion"+(n>1?"i":"e") : "")
         + (np ? " \u00b7 "+np+" prodott"+(np>1?"i":"o")+" a prezzo suo" : "")
         + ' \u00b7 '+esc(scad)+(c.note ? " \u00b7 "+esc(c.note) : "")
         + (c.tel ? " \u00b7 wa " + esc(c.tel) : "") + (c.mail ? " \u00b7 " + esc(c.mail) : "")
@@ -7928,7 +7974,7 @@ $("btnGenera").addEventListener("click", function(){
   var primaRiv = {tel:"", mail:"", riv:false};
   if(cliInModifica){
     var c = clienti.find(function(x){ return x.id === cliInModifica; });
-    if(c) primaRiv = {tel:c.tel || "", mail:c.mail || "", riv:!!c.riv, rivDi:c.rivDi || "", ricarico:c.ricarico};
+    if(c) primaRiv = {tel:c.tel || "", mail:c.mail || "", riv:!!c.riv, rivDi:c.rivDi || "", ricarico:c.ricarico, firma:firmaRicarichi(c)};
     if(c){ c.nome=d.nome; c.ditta=d.ditta; c.note=d.note; c.tel=d.tel; c.mail=d.mail; c.base=d.base; c.ecc=d.ecc; c.eccP=d.eccP; c.scad=d.scad; c.code=code; c.aggiornato=ora; c.riv=!!d.riv; if(d.dest) c.dest=d.dest; else delete c.dest; if(d.rivDi && d.rivDi !== c.id) c.rivDi=d.rivDi; else delete c.rivDi; }
   } else {
     idSalvato = "c"+uidNuovo();
@@ -7950,13 +7996,15 @@ $("btnGenera").addEventListener("click", function(){
      Si ricalcolano quando e' nuovo, quando non ha ancora prezzi suoi, quando cambia il ricarico o il rivenditore. */
   var rivC = (rvSalv && !rvSalv.riv) ? rivDelCliente(rvSalv) : null, ricalcolati = false;
   if(rivC){
-    var ricPrima = primaRiv.ricarico, cambiaRic = (ricPrima === undefined) ? d.ricarico !== 0 : ricPrima !== d.ricarico;
+    var cambiaRic = (primaRiv.firma || "") !== firmaRicarichi(d);
+    rvSalv.ricarico = d.ricarico;
+    if(d.ricEcc.length) rvSalv.ricEcc = d.ricEcc; else delete rvSalv.ricEcc;
+    if(d.ricEccP.length) rvSalv.ricEccP = d.ricEccP; else delete rvSalv.ricEccP;
     if(!haListinoSuo(rvSalv) || cambiaRic || copiatoDaAltri || (!RIV && primaRiv.rivDi && primaRiv.rivDi !== rvSalv.rivDi)){
-      var vRc = vociClienteRiv(rivC, d.ricarico);
+      var vRc = vociClienteRiv(rivC, rvSalv);
       if(vRc){ rvSalv.voci = vRc; rvSalv.fisso = true; ricalcolati = true; }
     }
-    rvSalv.ricarico = d.ricarico;
-  } else if(rvSalv) delete rvSalv.ricarico;
+  } else if(rvSalv){ delete rvSalv.ricarico; delete rvSalv.ricEcc; delete rvSalv.ricEccP; }
   var senzaListinoRiv = !!(rivC && !haListinoSuo(rvSalv));
   if(!salvaClienti()) return;
   /* l'ordine mostra subito i numeri appena scritti. Si cerca per scheda e non
@@ -7971,14 +8019,14 @@ $("btnGenera").addEventListener("click", function(){
   var npRiusa = (agg && agg.voci) ? Object.keys(agg.voci).length : 0;
   riusaDa = null;
   m.className="msg ok";
-  m.textContent = (cliInModifica ? "Cliente aggiornato" : (daChi ? "Cliente registrato come " + daChi : "Cliente registrato")) + ": base "+d.base+"%"
+  m.textContent = (cliInModifica ? "Cliente aggiornato" : (daChi ? "Cliente registrato come " + daChi : "Cliente registrato")) + ": " + (d.ricarico ? "ricarico +" + d.ricarico + "%" : "base " + d.base + "%")
     + (daChi && npRiusa ? ", " + npRiusa + " prodott" + (npRiusa>1?"i":"o") + " a prezzo suo" : "")
     + (d.ecc.length ? ", "+d.ecc.length+" sistem"+(d.ecc.length>1?"i":"a") : "")
     + (d.eccP.length ? ", "+d.eccP.length+" prodott"+(d.eccP.length>1?"i":"o") : "")
     + (d.scad ? ", scade il "+new Date(d.scad).toLocaleDateString("it-IT") : ", senza scadenza")
     + ". L\u2019ordine adesso usa i suoi sconti."
     + (senzaListinoRiv ? " \u26a0 Il listino del rivenditore non \u00e8 arrivato dal servizio (va aggiornato alla versione 21): i prezzi suoi non sono stati calcolati." : "")
-    + (ricalcolati ? " Prezzi suoi calcolati dal listino di " + (rivC.nome || "il rivenditore") + (d.ricarico ? " con il ricarico del " + N(d.ricarico) + "%" : " (senza ricarico)") + "." : "")
+    + (ricalcolati ? " Prezzi suoi calcolati dal listino di " + (rivC.nome || "il rivenditore") + (firmaRicarichi(d) ? " con " + (d.ricEcc.length || d.ricEccP.length ? "i ricarichi indicati" : "il ricarico del " + N(d.ricarico) + "%") : " (senza ricarico)") + "." : "")
     + (cliInModifica ? " Il codice \u00e8 cambiato: mandaglielo di nuovo (o rigenera la sua app)." : "")
     + (code.length > 64 ? " \u00c8 lungo da battere a mano: meglio copiarlo." : "")
     + (coll.dentro ? " " + coll.dentro + (coll.dentro === 1 ? " cliente collegato" : " clienti collegati") + " a " + d.nome + ": " + (coll.dentro === 1 ? "i suoi" : "i loro") + " ordini gli arrivano in copia." : "")
@@ -10866,6 +10914,7 @@ function righeModifiche(baseDati, mieDati, baseAll, mieAll){
       if(!p){ aggiungi("Cliente nuovo: " + n); return; }
       var cosa = [];
       if(p.base !== c.base) cosa.push("sconto base " + p.base + "% → " + c.base + "%");
+      if((p.ricarico || 0) !== (c.ricarico || 0) || !stessi(p.ricEcc || [], c.ricEcc || []) || !stessi(p.ricEccP || [], c.ricEccP || [])) cosa.push("ricarico" + (c.ricarico ? " +" + c.ricarico + "%" : ""));
       if(!stessi(p.ecc, c.ecc) || !stessi(p.eccP, c.eccP)) cosa.push("sconti per sistema o prodotto");
       if(!stessi(p.voci, c.voci)) cosa.push(c.fisso && !p.fisso ? "listino suo bloccato" : "prezzi suoi");
       if(p.nome !== c.nome) cosa.push("nome (prima «" + (p.nome || "") + "»)");
@@ -11118,7 +11167,7 @@ function migraListinoPosatori(){
   });
   clienti.forEach(function(c){
     if(haListinoSuo(c) || c.riv || !c.rivDi) return;
-    var rv = rivDelCliente(c), v = rv ? vociClienteRiv(rv, c.ricarico) : null;
+    var rv = rivDelCliente(c), v = rv ? vociClienteRiv(rv, c) : null;
     if(v){ c.voci = v; c.fisso = true; c.aggiornato = new Date().toISOString(); out.dalRiv.push(c.nome || "(senza nome)"); }
     else { c.voci = clone(oggi); c.fisso = true; out.bloccati.push(c.nome || "(senza nome)"); }
   });
