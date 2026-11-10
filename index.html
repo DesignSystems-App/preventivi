@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110171447";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110184608";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1148,7 +1148,14 @@ if(CLIENTE && SORGENTE === "online"){
       if(qq.d){ try{ destLink = JSON.parse(testoDaBase64Url(qq.d)); }catch(e){ destLink = null; } }
       if(destLink && typeof destLink === "object"){ destLink = {wa:(destLink.wa||[]).map(String), mail:(destLink.mail||[]).map(String)}; if(!destLink.wa.length && !destLink.mail.length) destLink = null; }
       LINK_CLI = {code:qq.c, nome:qq.n||"", id:qq.i||"", mail:qq.e||"", voci:(vociLink && typeof vociLink === "object") ? vociLink : null, quando:new Date().toISOString(), t:qq.t||"", dest:destLink,
-                  rivWa:String(qq.r||"").replace(/[^0-9]/g, ""), rivNome:qq.rn||"", ditta:qq.a||""};   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
+                  rivWa:String(qq.r||"").replace(/[^0-9]/g, ""), rivNome:qq.rn||"", ditta:qq.a||""};
+      /* SER 10/11 sera: l'icona sulla schermata Home dell'iPhone ha una memoria sua, separata da Safari: senza questo
+         chiedeva di nuovo numero e approvazione. Safari, dopo l'attivazione, mette nell'indirizzo il suo "telefono" (dv):
+         l'icona aggiunta da li' lo riprende, ma solo se e' davvero l'icona della Home (un indirizzo girato e aperto
+         in un browser non lo usa) e solo se questa memoria non ha gia' un suo telefono. */
+      var dvUrl = String(qq.dv || "").replace(/[^a-z0-9]/g, "").slice(0, 40);
+      var daHome = (window.navigator && window.navigator.standalone === true) || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+      if(dvUrl && daHome && !load(K.device, null)){ save(K.device, dvUrl); LINK_CLI.dvAdottato = true; }   /* SER 10/11: i clienti di un rivenditore mandano a lui il codice di attivazione */
       /* lo stesso link gia' attivato su questo telefono resta attivo (es. riaperto
          dalla schermata Home); uno nuovo va confermato (numero) e attivato (servizio) */
       var giaOk = load(K.link, null);
@@ -1175,6 +1182,10 @@ if(CLIENTE && SORGENTE === "online"){
     }
   }catch(e){ LINK_CLI = null; }
   if(!LINK_CLI) LINK_CLI = load(K.link, null);
+  /* attivo: l'indirizzo porta il "telefono" di questa pagina, cosi' l'icona aggiunta alla schermata Home lo ritrova */
+  if(LINK_CLI && LINK_CLI.attivato && /(^|[#&])c=/.test(location.hash || "") && !/[#&]dv=/.test(location.hash || "")){
+    try{ history.replaceState(null, "", location.pathname + location.search + location.hash + "&dv=" + idDispositivo()); }catch(e){}
+  }
   if(LINK_CLI && LINK_CLI.daConfermare){ /* il listino parte solo dopo la conferma del numero */ }
   else if(LINK_CLI && LINK_CLI.code && DATI) DATI.cliente = {nome:LINK_CLI.nome||"", code:LINK_CLI.code};
   /* un link personale toccato mentre l'app e' gia' aperta: si riparte */
@@ -9752,6 +9763,12 @@ function testoRifiuto(motivo){
     box.hidden = false;
     mostraAttesa(LINK_CLI.inAttesa.tel || "", LINK_CLI.inAttesa.codice || "");
     finisci(LINK_CLI.inAttesa.tel || "", true);
+  } else if(LINK_CLI.daConfermare && LINK_CLI.dvAdottato){
+    /* icona della schermata Home aggiunta da Safari gia' attivato: stesso telefono, niente numero da riscrivere */
+    box.hidden = false;
+    box.querySelector("p.corpo").textContent = "Attivo il tuo listino su questo telefono\u2026";
+    box.querySelector(".btnrow").hidden = true;
+    finisci("");
   } else if(LINK_CLI.daConfermare){
     box.hidden = false;
     if(LINK_CLI.okTel){
@@ -11326,6 +11343,7 @@ traduciPagina();
       if(!j || !j.ok || !j.dati || !j.dati.c) return giaLungo ? "" : "vecchio";
       var q = j.dati, h = "#c=" + encodeURIComponent(q.c) + "&n=" + encodeURIComponent(q.n||"") + "&i=" + encodeURIComponent(q.i||"")
         + (q.e ? "&e=" + encodeURIComponent(q.e) : "") + (q.t ? "&t=" + q.t : "") + (q.p ? "&p=" + q.p : "") + (q.d ? "&d=" + q.d : "") + (q.r ? "&r=" + q.r : "") + (q.rn ? "&rn=" + encodeURIComponent(q.rn) : "") + (q.a ? "&a=" + encodeURIComponent(q.a) : "") + "&k=" + mk[2];
+      var mdv = /(^|[#&])dv=([a-z0-9]{4,40})(&|$)/.exec(location.hash || ""); if(mdv) h += "&dv=" + mdv[2];   /* il telefono di questa pagina (per l'icona della Home) resta */
       if(location.hash !== h) history.replaceState(null, "", location.pathname + location.search + h);
       return "";
     }).catch(function(){ return giaLungo ? "" : "rete"; });
