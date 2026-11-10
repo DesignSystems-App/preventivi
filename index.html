@@ -514,6 +514,13 @@ details.card > summary::after{content:" \25BE"; color:var(--muted)}
 #cardVista[open] > summary{color:var(--fg)}
 .bar{height:6px; background:var(--surface-3); border-radius:999px; overflow:hidden; margin-top:6px}
 .bar span{display:block; height:100%; background:var(--accent)}
+/* SER 10/11: frecce per tornare in cima o andare in fondo: compaiono quando si scorre */
+#frecce{position:fixed; right:12px; bottom:calc(88px + env(safe-area-inset-bottom,0px)); z-index:55; display:flex; flex-direction:column; gap:10px; transition:opacity .25s}
+#frecce.via{opacity:0; pointer-events:none}
+#frecce button{width:46px; height:46px; border-radius:50%; border:1px solid var(--line-strong); background:var(--surface); color:var(--fg); font-size:20px; line-height:1;
+  box-shadow:0 4px 14px rgba(0,0,0,.18); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0}
+#frecce button[hidden]{display:none}
+@media print{ #frecce{display:none!important} }
 @media print{ #firma{border:1px solid #999} .firmariga{display:none!important}
   .topbar,.tabs,.btnrow,.step,.ghost,.schedabtn,.visore{display:none!important} body{background:#fff} .card{border-color:#999; break-inside:avoid} }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -835,7 +842,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110102637";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110114402";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -7262,7 +7269,7 @@ function mostraStatoSalvataggio(){
     + " (" + kb(JSON.stringify(m).length) + ").";
 }
 /* le richieste di attivazione in attesa: si chiedono al servizio quando si apre la scheda e ogni 30 secondi */
-var RICHIESTE_TIMER = null, RICHIESTE = [];
+var RICHIESTE_TIMER = null, RICHIESTE = [], RICHIESTE_FATTE = {};   /* SER 10/11: id|telefono gia' approvati o rifiutati: non tornano in elenco */
 /* le richieste in attesa compaiono anche dentro la scheda del cliente, con Approva / Rifiuta */
 function htmlRichiesta(r, cl){
   var q = r.quando ? new Date(r.quando) : null;
@@ -7288,7 +7295,7 @@ function rispondiRichiesta(ok, id, device, m){
   fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione: ok ? "approva" : "rifiuta", id:id, device:device})})
     .then(function(r){ return r.json(); })
     .then(function(j){
-      if(j && j.ok){ m.className = "msg ok"; m.textContent = ok ? "Approvato: il listino si attiva sul suo telefono entro pochi secondi." : "Rifiutato: quel telefono non potr\u00e0 usare questo link."; }
+      if(j && j.ok){ RICHIESTE_FATTE[id + "|" + device] = Date.now(); m.className = "msg ok"; m.textContent = ok ? "Approvato: il listino si attiva sul suo telefono entro pochi secondi." : "Rifiutato: quel telefono non potr\u00e0 usare questo link."; }
       else { m.className = "msg err"; m.textContent = "Il servizio non ha accettato la richiesta."; }
       disegnaRichieste();
     })
@@ -7302,7 +7309,7 @@ function disegnaRichieste(){
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(!j || !j.ok){ if(j && j.motivo === "azione"){ box.hidden = true; } return; }
-      var l = j.attese || [];
+      var l = (j.attese || []).filter(function(r){ var f = RICHIESTE_FATTE[r.id + "|" + r.device]; return !(f && Date.now() - f < 15 * 60000); });   // il servizio puo' rispondere ancora per qualche istante con quella vecchia
       RICHIESTE = l; aggiornaRichiesteSchede();
       box.hidden = !l.length;
       $("contaRichieste").textContent = l.length ? "(" + l.length + ")" : "";
@@ -9257,10 +9264,19 @@ function segnaOrdiniVisti(numeri){ save("pavpro.ordini.visti.v1", {numeri:numeri
 function notificheAttive(){ return !!load("pavpro.notifiche.v1", false) && typeof Notification !== "undefined" && Notification.permission === "granted"; }
 function disegnaStatoNotifiche(){
   var el = $("notifStato"), b = $("btnNotifiche"); if(!el) return;
+  if(pushPossibile()){
+    b.hidden = false;
+    if(Notification.permission === "denied"){ el.textContent = "Le notifiche sono bloccate per il gestionale: riattivale nelle impostazioni del telefono (Notifiche) o del browser. Intanto, con l\u2019app aperta, i nuovi ordini suonano e compaiono qui."; b.hidden = true; return; }
+    el.textContent = PUSH.attivo ? "Notifiche attive su questo dispositivo: ogni nuovo ordine arriva come notifica col suono, anche con l\u2019app chiusa. Con l\u2019app aperta suona anche qui."
+                                 : "Con l\u2019app aperta i nuovi ordini suonano e compaiono qui. Premi il tasto qui sopra per riceverli come notifica col suono anche con l\u2019app chiusa.";
+    b.textContent = PUSH.attivo ? "Spegni le notifiche" : "Avvisami dei nuovi ordini";
+    return;
+  }
+  if(suIphone() && !(window.navigator.standalone)){ el.textContent = "Con l\u2019app aperta i nuovi ordini suonano e compaiono qui. Per le notifiche anche ad app chiusa apri il gestionale dall\u2019icona sulla schermata Home (iPhone con iOS 16.4 o pi\u00f9 recente) e premi \u00abAvvisami dei nuovi ordini\u00bb."; b.hidden = true; return; }
   if(typeof Notification === "undefined"){ el.textContent = "Questo browser non sa mostrare le notifiche: gli avvisi compaiono solo qui dentro."; b.hidden = true; return; }
   if(notificheAttive()){ el.textContent = "Notifiche attive: finch\u00e9 questa gestione resta aperta (anche dietro altre finestre) il Mac ti avvisa di ogni nuovo ordine, con un suono."; b.textContent = "Spegni le notifiche"; }
   else if(Notification.permission === "denied"){ el.textContent = "Il browser ha bloccato le notifiche per questa pagina: sbloccale dalle impostazioni del sito. Intanto gli avvisi compaiono qui dentro e sul tab."; b.hidden = true; }
-  else { el.textContent = "Gli avvisi dei nuovi ordini compaiono qui e sul tab \u00abCodici cliente\u00bb. Con il tasto qui sopra arrivano anche come notifica del Mac, con un suono."; b.textContent = "Avvisami dei nuovi ordini"; }
+  else { el.textContent = "Con il gestionale aperto i nuovi ordini suonano e compaiono qui e sul tab \u00abCodici cliente\u00bb. Con il tasto qui sopra arrivano anche come notifica del Mac."; b.textContent = "Avvisami dei nuovi ordini"; }
 }
 /* SER 09/11: nella scheda di un rivenditore si spuntano i suoi clienti (i rivenditori non compaiono in elenco).
    Salvando, ogni cliente spuntato diventa "cliente di" questo rivenditore e i suoi ordini arrivano in copia
@@ -9339,6 +9355,7 @@ $("genRivDi").addEventListener("change", function(){
   sel.dataset.prima = sel.value;
 });
 $("btnNotifiche").addEventListener("click", function(){
+  if(pushPossibile()){ var mm = $("notifStato"); if(PUSH.attivo) pushSpegni(); else { mm.textContent = "Attivo le notifiche\u2026"; pushAttiva(mm); } return; }
   if(notificheAttive()){ save("pavpro.notifiche.v1", false); disegnaStatoNotifiche(); return; }
   if(typeof Notification === "undefined") return;
   Notification.requestPermission().then(function(p){
@@ -9346,11 +9363,18 @@ $("btnNotifiche").addEventListener("click", function(){
     disegnaStatoNotifiche();
   });
 });
+/* SER 10/11: il suono suona sempre (non solo con le notifiche del Mac): il browser lo permette dopo il primo tocco sulla pagina */
+var AC_ORD = null;
+document.addEventListener("pointerdown", function(){
+  if(CLIENTE) return;
+  try{ var AC0 = window.AudioContext || window.webkitAudioContext; if(!AC_ORD && AC0) AC_ORD = new AC0(); if(AC_ORD && AC_ORD.state === "suspended") AC_ORD.resume(); }catch(e){}
+}, {passive:true});
 function suonoOrdine(){
   try{
     var AC = window.AudioContext || window.webkitAudioContext; if(!AC) return;
-    var ac = new AC(), t = ac.currentTime;
-    [[880, 0], [1175, 0.18]].forEach(function(nf){
+    var ac = AC_ORD || new AC(), t = ac.currentTime + 0.05;
+    if(ac.state === "suspended") try{ ac.resume(); }catch(e){}
+    [[880, 0], [1175, 0.18], [880, 0.6], [1175, 0.78], [1568, 0.96]].forEach(function(nf){
       var o = ac.createOscillator(), g = ac.createGain();
       o.type = "sine"; o.frequency.value = nf[0]; o.connect(g); g.connect(ac.destination);
       g.gain.setValueAtTime(0.0001, t + nf[1]); g.gain.exponentialRampToValueAtTime(0.25, t + nf[1] + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + nf[1] + 0.35);
@@ -9420,8 +9444,9 @@ function controllaNuoviOrdini(){
       segnaOrdiniVisti(visti.numeri.concat(numeri.filter(function(x){ return visti.numeri.indexOf(x) < 0; })));
       nuovi.forEach(function(o){ if(!ORDINI_NUOVI.some(function(x){ return String(x.numero) === String(o.numero); })) ORDINI_NUOVI.unshift(o); });
       mostraNuoviOrdini();
-      if(notificheAttive()){
-        suonoOrdine();
+      suonoOrdine();                                   // SER 10/11: sempre, anche senza le notifiche del Mac
+      try{ if(navigator.vibrate) navigator.vibrate([300, 150, 300]); }catch(e){}
+      if(notificheAttive() && !pushPossibile()){
         nuovi.forEach(function(o){
           try{
             var nt = new Notification("Nuovo ordine " + descrizioneOrdine(o).split(" \u2014 ")[0], {body:descrizioneOrdine(o).replace(/^n\. \S+ \u2014 /, ""), tag:"ordine-" + o.numero});
@@ -9436,8 +9461,45 @@ function controllaNuoviOrdini(){
 function avviaControlloOrdini(){
   if(ORDINI_TIMER) return;
   controllaNuoviOrdini();
-  ORDINI_TIMER = setInterval(controllaNuoviOrdini, 60000);
+  ORDINI_TIMER = setInterval(controllaNuoviOrdini, 30000);
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden) controllaNuoviOrdini(); });   /* tornando sull'app si controlla subito */
   disegnaStatoNotifiche();
+  pushControlla();
+}
+/* ---- SER 10/11: notifiche push (servizio v20): avvisano col suono del telefono anche ad app chiusa.
+   Funzionano col gestionale aperto da internet (sul telefono: dall'icona sulla schermata Home). ---- */
+function pushPossibile(){ return location.protocol === "https:" && "serviceWorker" in navigator && "PushManager" in window && typeof Notification !== "undefined"; }
+function suIphone(){ return /iPhone|iPad|iPod/.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); }
+function b64uInByte(s){ s = String(s).replace(/-/g, "+").replace(/_/g, "/"); while(s.length % 4) s += "="; var bin = atob(s), u = new Uint8Array(bin.length); for(var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+var PUSH = {attivo:false, controllato:false};
+function pushControlla(){
+  if(!pushPossibile()){ disegnaStatoNotifiche(); return; }
+  navigator.serviceWorker.getRegistration("sw-gestione.js").then(function(reg){
+    if(!reg || !reg.pushManager) return null;
+    return reg.pushManager.getSubscription();
+  }).then(function(sub){ PUSH.attivo = !!(sub && Notification.permission === "granted"); PUSH.controllato = true; disegnaStatoNotifiche(); }).catch(function(){ PUSH.controllato = true; disegnaStatoNotifiche(); });
+}
+function pushAttiva(m){
+  Notification.requestPermission().then(function(p){
+    if(p !== "granted"){ m.textContent = "Il telefono non ha dato il permesso per le notifiche: lo trovi in Impostazioni \u2192 Notifiche."; disegnaStatoNotifiche(); return; }
+    syncChiama({azione:"pushChiave"}, function(j){
+      if(!j || !j.ok || !j.chiave){ m.textContent = (j && j.motivo === "azione") ? "Il servizio su Cloudflare \u00e8 a una versione vecchia: incolla la versione 20." : "Il servizio non risponde, riprova."; return; }
+      navigator.serviceWorker.register("sw-gestione.js").then(function(){ return navigator.serviceWorker.ready; }).then(function(reg){
+        return reg.pushManager.getSubscription().then(function(vecchia){ return vecchia || reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64uInByte(j.chiave)}); });
+      }).then(function(sub){
+        syncChiama({azione:"pushIscrivi", sub:JSON.parse(JSON.stringify(sub)), dispositivo:syncDispositivo()}, function(k){
+          if(k && k.ok){ PUSH.attivo = true; save("pavpro.notifiche.v1", true); suonoOrdine(); m.textContent = ""; }
+          else m.textContent = "Il servizio non ha registrato questo dispositivo, riprova.";
+          disegnaStatoNotifiche();
+        });
+      }).catch(function(e){ m.textContent = "Non riesco ad attivare le notifiche su questo dispositivo (" + (e && e.message || e) + ")."; disegnaStatoNotifiche(); });
+    });
+  });
+}
+function pushSpegni(){
+  navigator.serviceWorker.getRegistration("sw-gestione.js").then(function(reg){ return reg && reg.pushManager ? reg.pushManager.getSubscription() : null; }).then(function(sub){
+    if(sub){ syncChiama({azione:"pushTogli", sub:JSON.parse(JSON.stringify(sub))}, function(){}); return sub.unsubscribe(); }
+  }).catch(function(){}).then(function(){ PUSH.attivo = false; save("pavpro.notifiche.v1", false); disegnaStatoNotifiche(); });
 }
 $("btnOrdiniTutti").addEventListener("click", function(){ disegnaOrdiniRicevuti(null); });
 $("elencoOrdini").addEventListener("click", function(e){
@@ -10000,6 +10062,26 @@ function disegnaInstalla(){
   setTimeout(disegnaInstalla, 1200);
 })();
 
+/* SER 10/11: frecce su e giu', visibili mentre si scorre (spariscono dopo qualche secondo di fermo) */
+(function(){
+  var box = document.createElement("div"); box.id = "frecce"; box.className = "via";
+  box.innerHTML = '<button type="button" id="frecciaSu" aria-label="' + esc(T("Torna in cima")) + '">\u25B2</button><button type="button" id="frecciaGiu" aria-label="' + esc(T("Vai in fondo")) + '">\u25BC</button>';
+  document.body.appendChild(box);
+  var timer = null, sopra = false;
+  function aggiorna(){
+    var h = document.documentElement.scrollHeight, y = window.scrollY || 0, v = window.innerHeight;
+    if(h < v * 1.8){ box.className = "via"; return; }
+    document.getElementById("frecciaSu").hidden = y < 300;
+    document.getElementById("frecciaGiu").hidden = y + v > h - 300;
+    box.className = "";
+    clearTimeout(timer); timer = setTimeout(function(){ if(!sopra) box.className = "via"; }, 2500);
+  }
+  window.addEventListener("scroll", aggiorna, {passive:true});
+  box.addEventListener("pointerenter", function(e){ if(e.pointerType === "mouse") sopra = true; }); box.addEventListener("pointerleave", function(e){ if(e.pointerType === "mouse"){ sopra = false; aggiorna(); } });
+  document.getElementById("frecciaSu").addEventListener("click", function(){ window.scrollTo({top:0, behavior:"smooth"}); });
+  document.getElementById("frecciaGiu").addEventListener("click", function(){ window.scrollTo({top:document.documentElement.scrollHeight, behavior:"smooth"}); });
+})();
+
 /* ---- avvio ---- */
 if(CLIENTE){ $("btnGest").hidden = true; $("navTabs").hidden = true; }
 if(migrato){
@@ -10374,7 +10456,7 @@ function agganciaSchedeDiFabbrica(){
 var SYNC_K = "pavpro.sync.v1";
 var RIV = null;   /* SER 10/11: area rivenditore: {id, nome, io:{id,nome,tel,mail,lk}, server:{id:json}, gen:listino} */
 var SYNC = { pronto:false, attiva:false, quando:null, sporco:false, sporcoPre:false, timer:null, inCorso:false, attPend:{}, poll:null, msg:"", errore:"" };
-var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1, "pavpro.modifiche.backup.v1":1, "pavpro.sync.incompleta.v1":1 };
+var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1, "pavpro.modifiche.backup.v1":1, "pavpro.sync.incompleta.v1":1, "pavpro.ordini.visti.v1":1 };
 function syncChiave(k){ return !!k && k.indexOf("pavpro.") === 0 && !SYNC_ESCLUSE[k] && k.indexOf(K.attPre) !== 0; }
 function syncStatoLocale(){
   var d = {};
