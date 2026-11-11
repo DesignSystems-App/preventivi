@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261110210000";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261110214300";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1101,8 +1101,44 @@ var MEMORIA_OK = (function(){
   }catch(e){ return false; }
 })();
 
-function load(k, def){ try{ var v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){ return def; } }
-function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+/* SER 10/11 notte: sull'iPhone la memoria del browser tiene circa 2,5 milioni di caratteri per sito. Il listino
+   (pavpro.modifiche.v1) ne pesa 2,5 milioni, e quasi tutto sono le stesse 60 foto dei colori ripetute in 7 prodotti
+   (il GHIAINO in ogni sistema), piu' la sua copia di sicurezza: non ci stava piu' («memoria piena»).
+   Qui, SOLO nella memoria del dispositivo, ogni foto si tiene una volta (pavpro.immagini.v1) e nel listino resta
+   un segnaposto; chi legge riceve sempre il testo intero, identico a prima. Il servizio e gli altri dispositivi
+   vedono il listino normale: non cambia niente fuori da questo dispositivo. */
+var IMG_K = "pavpro.immagini.v1", IMG_RE = /data:image\/[a-z+.\-]+;base64,[A-Za-z0-9+\/=]{200,}/g, IMG_SEGNO = /@@pvimg:([a-z0-9]+-[0-9]+)@@/g;
+var IMG_COMPATTE = {"pavpro.modifiche.v1":1, "pavpro.modifiche.backup.v1":1};
+var IMG_TAB = null;
+function imgTab(){
+  if(IMG_TAB) return IMG_TAB;
+  try{ IMG_TAB = JSON.parse(localStorage.getItem(IMG_K) || "{}") || {}; }catch(e){ IMG_TAB = {}; }
+  return IMG_TAB;
+}
+function imgChiave(t){ var h = 0x811c9dc5; for(var i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36) + "-" + t.length; }
+function lsGet(k){
+  var v = localStorage.getItem(k);
+  if(v && IMG_COMPATTE[k] && v.indexOf("@@pvimg:") >= 0){
+    var tab = imgTab(), manca = false;
+    v = v.replace(IMG_SEGNO, function(tutto, h){ if(tab[h] === undefined){ manca = true; return tutto; } return tab[h]; });
+    if(manca) throw new Error("foto mancanti");          // meglio niente che un listino senza foto
+  }
+  return v;
+}
+function lsSet(k, v){
+  if(!IMG_COMPATTE[k] || typeof v !== "string" || v.length < 20000){ localStorage.setItem(k, v); return; }
+  var tab = imgTab(), nuove = false;
+  var corto = v.replace(IMG_RE, function(u){ var h = imgChiave(u); if(tab[h] !== u){ tab[h] = u; nuove = true; } return "@@pvimg:" + h + "@@"; });
+  if(corto.length === v.length){ localStorage.setItem(k, v); return; }
+  /* le foto che nessuno usa piu' (ne' questo testo ne' l'altra copia del listino) si tolgono */
+  var usate = {}; corto.replace(IMG_SEGNO, function(t, h){ usate[h] = 1; return t; });
+  for(var altra in IMG_COMPATTE){ if(altra === k) continue; var a = localStorage.getItem(altra); if(a) a.replace(IMG_SEGNO, function(t, h){ usate[h] = 1; return t; }); }
+  for(var h0 in tab) if(!usate[h0]){ delete tab[h0]; nuove = true; }
+  if(nuove) localStorage.setItem(IMG_K, JSON.stringify(tab));      // prima le foto, poi il testo che le usa
+  localStorage.setItem(k, corto);
+}
+function load(k, def){ try{ var v=lsGet(k); return v?JSON.parse(v):def; }catch(e){ return def; } }
+function save(k, v){ try{ lsSet(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 function drop(k){ try{ localStorage.removeItem(k); }catch(e){} }
 /* I testi incollati da un PDF possono portare caratteri di controllo (U+0001 al posto degli
    spazi): sullo schermo diventano quadratini. Qui si puliscono ovunque si scrive un testo. */
@@ -2776,7 +2812,7 @@ function salvaListino(){
   var testo = JSON.stringify(m);
   var ok = save(K.mod, m);
   if(ok){
-    try{ ok = localStorage.getItem(K.mod) === testo; }catch(e){ ok = false; }   // verifica che sia davvero scritto
+    try{ ok = lsGet(K.mod) === testo; }catch(e){ ok = false; }   // verifica che sia davvero scritto
   }
   if(ok){
     save(K.modBak, m);                // seconda copia, per sicurezza
@@ -10681,11 +10717,16 @@ function agganciaSchedeDiFabbrica(){
 var SYNC_K = "pavpro.sync.v1";
 var RIV = null;   /* SER 10/11: area rivenditore: {id, nome, io:{id,nome,tel,mail,lk}, server:{id:json}, gen:listino} */
 var SYNC = { pronto:false, attiva:false, quando:null, sporco:false, sporcoPre:false, timer:null, inCorso:false, attPend:{}, poll:null, msg:"", errore:"" };
-var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1, "pavpro.modifiche.backup.v1":1, "pavpro.sync.incompleta.v1":1, "pavpro.ordini.visti.v1":1 };
+var SYNC_ESCLUSE = { "pavpro.sync.v1":1, "pavpro.sync.impronta.v1":1, "pavpro.assistente.v1":1, "pavpro.device.v1":1, "pavpro.prova":1, "pavpro.sel.v3":1, "pavpro.cliente.v2":1, "pavpro.attivazioni.v1":1, "pavpro.lingua.v1":1, "pavpro.notifiche.v1":1, "pavpro.ordgest.v1":1, "pavpro.modifiche.backup.v1":1, "pavpro.sync.incompleta.v1":1, "pavpro.ordini.visti.v1":1,
+  /* SER 10/11 notte: l'app dei clienti sta sullo stesso sito del gestionale del telefono e scrive nella stessa memoria:
+     la sua attivazione, i suoi ordini e le sue scelte restano sul telefono. Prima finivano nella memoria condivisa e
+     da li' sugli altri telefoni, dove riportavano l'app del cliente alla pagina di attivazione. */
+  "pavpro.linkcliente.v1":1, "pavpro.rifiuto.v1":1, "pavpro.ordini.v1":1, "pavpro.ordmod.v1":1, "pavpro.richiesta.v1":1,
+  "pavpro.installa.no":1, "pavpro.fonte.v1":1, "pavpro.ordini.cont":1, "pavpro.letti.v1":1, "pavpro.immagini.v1":1 };
 function syncChiave(k){ return !!k && k.indexOf("pavpro.") === 0 && !SYNC_ESCLUSE[k] && k.indexOf(K.attPre) !== 0; }
 function syncStatoLocale(){
   var d = {};
-  try{ for(var i=0;i<localStorage.length;i++){ var k = localStorage.key(i); if(syncChiave(k)) d[k] = localStorage.getItem(k); } }catch(e){}
+  try{ for(var i=0;i<localStorage.length;i++){ var k = localStorage.key(i); if(syncChiave(k)) d[k] = lsGet(k); } }catch(e){}
   return d;
 }
 function syncImpronta(v){ v = String(v || ""); return v.length + "-" + chiaveDesc(v.length > 12000 ? v.slice(0, 6000) + v.slice(-6000) : v); }
@@ -11047,7 +11088,7 @@ function syncUnisci(tentativo){
 /* prende dal servizio e riparte con quella memoria.
    mie (facoltativo): la memoria locale da cui si e' partiti per unire; si riscrivono solo le chiavi che
    sono cambiate rispetto a lei, cosi' quello che hai scritto nel frattempo non si perde */
-function scriviChiave(k, v){ try{ localStorage.setItem(k, v); if(localStorage.getItem(k) !== v) throw new Error("non scritta"); }catch(e){ nonScritte.push(k); } }
+function scriviChiave(k, v){ try{ lsSet(k, v); if(lsGet(k) !== v) throw new Error("non scritta"); }catch(e){ nonScritte.push(k); } }
 var nonScritte = [];
 /* la memoria di questo dispositivo non contiene tutto: niente salvataggi sul servizio, finche' non si sistema */
 function memoriaIncompleta(chiavi){
