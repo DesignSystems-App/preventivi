@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261111113243";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261111132751";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -5818,14 +5818,16 @@ function destinatariDi(cli){
 function testoLink(cli, url, via){
   var az = (typeof AZIENDA !== "undefined" && AZIENDA) || {}, nomeAz = az.nome || "Design Systems Srl";
   var chi = String((cli && cli.nome) || "").trim();
-  return "Ciao" + (chi ? " " + chi : "") + ", ecco la tua app Design Systems per preventivi e ordini, con il tuo listino personale:\n"
+  /* SER 11/11: messaggio corto, senza istruzioni lunghe; al cliente di un rivenditore porta il nome del SUO rivenditore */
+  var rvT = (cli && cli.rivDi) ? ((RIV && cli.rivDi === RIV.io.id) ? RIV.io : clienti.find(function(x){ return x.id === cli.rivDi && x.riv; })) : null;
+  var nomeRiv = String((rvT && rvT.nome) || "").trim();
+  return "Ciao" + (chi ? " " + chi : "")
+    + (nomeRiv ? ", ecco la tua app per preventivi e ordini, con il listino personale che ti ha riservato " + nomeRiv
+               : ", ecco la tua app Design Systems per preventivi e ordini, con il tuo listino personale") + ":\n"
     + url + "\n\n"
-    + "Aprila dal tuo telefono. Il link \u00e8 personale: vale solo per te e per questo telefono, non inoltrarlo.\n\n"
-    + "Per averla come app sulla schermata Home:\n"
-    + "\u2022 iPhone: tocca il link; se si apre dentro WhatsApp, tocca in basso a destra l\u2019icona di Safari (la bussola) per aprirlo in Safari. In Safari tocca Condividi (il quadrato con la freccia in su), poi \u201cAggiungi alla schermata Home\u201d e Aggiungi.\n"
-    + "\u2022 Android: tocca il link, si apre in Chrome; tocca i tre puntini in alto a destra, poi \u201cAggiungi a schermata Home\u201d (o \u201cInstalla app\u201d) e Aggiungi.\n\n"
-    + "Da l\u00ec in poi la trovi fra le tue app, sempre aggiornata con i tuoi prezzi. Per qualsiasi cosa " + (via === "mail" ? "rispondi a questa email" : "scrivici qui su WhatsApp") + ".\n"
-    + nomeAz;
+    + "Aprila dal tuo telefono: il link \u00e8 personale e vale solo per questo telefono, non inoltrarlo.\n"
+    + "Per tenerla fra le tue app: aprila in Safari (iPhone) o Chrome (Android) e scegli \u201cAggiungi alla schermata Home\u201d.\n\n"
+    + (nomeRiv || nomeAz);
 }
 /* i pezzi del link lungo (#c=&n=&i=&e=&t=&p=) come oggetto, per registrarli sul servizio */
 function datiLinkDa(url){
@@ -5854,13 +5856,26 @@ function linkBreve(cli, poi){
   LK_TENT[cli.id] = Date.now(); LK_ATTESA[cli.id] = [poi];
   function fine(u){ var l = LK_ATTESA[cli.id] || []; delete LK_ATTESA[cli.id]; l.forEach(function(f){ f(u); }); }
   var vecchio = (/#k=([a-z0-9]+)/.exec(cli.lk || "") || [])[1] || "";
-  fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:"link", id:vecchio, dati:datiLinkDa(lungo)})})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if(j && j.ok && j.id){ cli.lk = lungo.split("#")[0] + "#k=" + j.id; cli.lkDi = lungo; delete LK_TENT[cli.id]; salvaClienti(); fine(cli.lk); }
-      else fine(lungo);
-    })
-    .catch(function(){ fine(lungo); });
+  /* SER 11/11: nell'area rivenditore il cliente appena salvato deve prima arrivare sul servizio, altrimenti il servizio
+     risponde «non tuo» e partiva il link lungo (migliaia di caratteri). Qui si aspetta e si riprova. */
+  var giri = 0, rifiuti = 0;
+  function sulServizio(){ return !RIV || (!RIV_CODA && RIV.server[cli.id] !== undefined); }
+  (function prova(){
+    if(!sulServizio() && giri++ < 30){ setTimeout(prova, 500); return; }
+    fetch(a.url.replace(/\/+$/,"") + "/admin", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({chiave:a.chiave, azione:"link", id:vecchio, dati:datiLinkDa(lungo)})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(j && j.ok && j.id){
+          var breve = lungo.split("#")[0] + "#k=" + j.id;
+          var ora = (typeof clienti !== "undefined" && clienti.find(function(x){ return x.id === cli.id; })) || cli;   // la scheda puo' essere stata ricaricata dal servizio
+          ora.lk = breve; ora.lkDi = lungo; cli.lk = breve; cli.lkDi = lungo;
+          delete LK_TENT[cli.id]; salvaClienti(); fine(breve);
+        }
+        else if(RIV && j && j.motivo === "non tuo" && rifiuti++ < 4){ setTimeout(prova, 1500); }
+        else fine(lungo);
+      })
+      .catch(function(){ fine(lungo); });
+  })();
 }
 function linkPronto(cli){ var l = linkCliente(cli); return !!(l && cli.lk && cli.lkDi === l); }
 /* i link di tutti i clienti si registrano in anticipo, cosi' i tasti rispondono subito */
@@ -5873,7 +5888,19 @@ function mandaLink(cli, m, modo){
      quindi si apre subito vuota e si riempie quando il link corto e' pronto */
   var finestra = null;
   if((modo === "wa" || modo === undefined || modo === false) && !linkPronto(cli) && linkCliente(cli) && !suTelefono()){ try{ finestra = window.open("about:blank", "_blank"); }catch(e){ finestra = null; } }
-  linkBreve(cli, function(url){ mandaLink2(cli, m, modo, url, finestra); });
+  if(!linkPronto(cli)){ m.className = "msg"; m.textContent = "Preparo il link\u2026"; }
+  linkBreve(cli, function(url){
+    /* SER 11/11: se il servizio non ha dato il link corto e quello lungo porta tutto il listino (migliaia di caratteri),
+       non si manda: in un messaggio arriva illeggibile e spesso tagliato */
+    var aL = (typeof attImpostazioni === "function") ? attImpostazioni() : {};
+    if(url && url.indexOf("#k=") < 0 && url.length > 1500 && /^https?:\/\//i.test(aL.url || "") && aL.chiave){
+      try{ if(finestra) finestra.close(); }catch(e){}
+      delete LK_TENT[cli.id];
+      m.className = "msg err"; m.textContent = "Il link di " + (cli.nome || "questo cliente") + " non \u00e8 ancora pronto (il servizio non ha risposto): aspetta qualche secondo e premi di nuovo.";
+      return;
+    }
+    mandaLink2(cli, m, modo, url, finestra);
+  });
 }
 function mandaLink2(cli, m, modo, url, finestra){
   var copiaSolo = (modo === true || modo === "copia");
@@ -7567,7 +7594,9 @@ $("btnGest").addEventListener("click", function(){
     mostraVista("prev"); disegna(); disegnaOrdGest();
     return;
   }
-  if(RIV && syncCfg()){ entraInGestione(); return; }   /* rivenditore gia' attivato: niente password */
+  /* rivenditore gia' attivato: niente password (se la sua area non e' ancora pronta, si aspetta) */
+  if(RIV && syncCfg()){ if(RIV.pronto) entraInGestione(); else rivAttesa(false); return; }
+  if(rivRicordato()){ rivAttesa(!!SYNC.rivFermo); return; }
   apriPassword();
 });
 
@@ -9150,7 +9179,31 @@ function testoAreaRivenditore(nome, codice){
     + "Sull\u2019iPhone aprila con Safari e aggiungila alla schermata Home (Condividi \u2192 Aggiungi alla schermata Home). Quando ti chiede la password, incolla questo codice e premi Entra:\n" + codice + "\n\n"
     + "Il codice \u00e8 solo tuo: non girarlo a nessuno.";
 }
+/* SER 11/11: il rivenditore scrive il codice SOLO la prima volta. Il dispositivo si ricorda che e' la sua area
+   (dentro alle impostazioni del servizio, che non vanno mai nella memoria condivisa): da li' in poi la password
+   non compare piu', nemmeno se tocca «Gestione» prima che il servizio abbia risposto o se manca la rete. */
+function rivRicordato(){
+  var a = load(K.att, null);
+  return (a && a.riv && a.chiave && a.riv.k === a.chiave && /^https?:\/\//i.test(a.url || "")) ? a.riv : null;
+}
+function rivRicorda(j){
+  var a = load(K.att, null); if(!a || !a.chiave) return;
+  if(a.riv && a.riv.k === a.chiave && a.riv.id === j.rivId && a.riv.nome === (j.nome || "")) return;
+  a.riv = {id:j.rivId, nome:j.nome || "", k:a.chiave}; saveVero(K.att, a);
+}
+function rivDimentica(){ var a = load(K.att, null); if(a && a.riv){ delete a.riv; saveVero(K.att, a); } var d = document.getElementById("rivAttesa"); if(d) d.remove(); }
+function rivAttesa(errore){
+  var d = document.getElementById("rivAttesa"), rr = rivRicordato();
+  if(!d){ d = document.createElement("div"); d.className = "card"; d.id = "rivAttesa"; d.style.borderColor = "var(--accent)"; $("vPrev").insertBefore(d, $("vPrev").firstChild); }
+  d.innerHTML = '<h2>' + esc((rr && rr.nome) || "Area rivenditore") + '</h2>'
+    + (errore ? '<p class="msg err" style="margin:0 0 10px">Non riesco a collegarmi al servizio: controlla la connessione a internet.</p>'
+                + '<div class="btnrow"><button class="btn" type="button" id="rivRiprova">Riprova</button></div>'
+              : '<p class="msg" style="margin:0">Apro la tua area\u2026</p>');
+  var br = document.getElementById("rivRiprova"); if(br) br.addEventListener("click", function(){ location.reload(); });
+}
 function rivAvvia(j, poi){
+  var poiVero = poi; poi = function(){ if(RIV) RIV.pronto = true; poiVero(); };
+  rivRicorda(j);
   SYNC.attiva = false; SYNC.pronto = true; SYNC.ruolo = "rivenditore"; SYNC.nome = j.nome || "";
   if(SYNC.poll){ clearInterval(SYNC.poll); SYNC.poll = null; }
   RIV = {id:j.rivId, nome:j.nome || "", io:{id:j.rivId, nome:j.nome || "", tel:"", mail:"", lk:""}, server:{}, gen:null, errore:""};
@@ -9179,16 +9232,22 @@ function rivAvvia(j, poi){
 /* SER 11/11: il gestionale del rivenditore porta il SUO nome: titolo, barra in alto e nome dell'icona sulla Home */
 function nomeGestionaleRiv(n){
   n = String(n || "").trim(); if(!n) return;
+  /* nome corto per la barra e per l'icona: le prime parole fino a 14 caratteri ("Fran.Cal. di Belfiore Franco & C. S.N.C." -> "Fran.Cal.") */
+  var par = n.split(/\s+/), corto = par[0], ip = 1;
+  while(ip < par.length && (corto + " " + par[ip]).length <= 14){ corto += " " + par[ip]; ip++; }
+  if(ip < par.length){ var pc = corto.split(" "); while(pc.length > 1 && pc[pc.length - 1].replace(/[^A-Za-z\u00c0-\u024f0-9]/g, "").length <= 2) pc.pop(); corto = pc.join(" "); }
+  if(corto.length > 18) corto = corto.slice(0, 18);
+  var nLungo = n; n = corto;
   var mt = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if(mt) mt.setAttribute("content", n);
   var cont = (document.title.match(/^\(\d+\) /) || [""])[0];
-  document.title = cont + "Gestionale " + n;
+  document.title = cont + "Gestionale " + nLungo;
   var h1 = document.querySelector("header.topbar h1");
   if(h1 && h1.firstChild && h1.firstChild.nodeType === 3) h1.firstChild.nodeValue = n;
   var ml = document.querySelector('link[rel="manifest"]');
   if(ml && !ml.getAttribute("data-riv")){
     try{
       var qui = location.href.split("#")[0].split("?")[0], dir = qui.replace(/[^\/]*$/, "");
-      var man = {name:"Gestionale " + n, short_name:n, description:"Gestionale di " + n, display:"standalone",
+      var man = {name:"Gestionale " + nLungo, short_name:n, description:"Gestionale di " + nLungo, display:"standalone",
                  start_url:dir + "index.html", scope:dir, background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
                  icons:[{src:new URL("../icon-192.png", dir).href, sizes:"192x192", type:"image/png"},
                         {src:new URL("../icon-512.png", dir).href, sizes:"512x512", type:"image/png", purpose:"any maskable"}]};
@@ -9199,6 +9258,7 @@ function nomeGestionaleRiv(n){
 }
 function rivEntra(){
   S.gestione = true;
+  var ra = document.getElementById("rivAttesa"); if(ra) ra.remove();
   nomeGestionaleRiv(RIV.io.nome || RIV.nome);
   $("btnGest").setAttribute("aria-pressed","true");
   $("tabGest").hidden = true; $("tabCom").hidden = true; $("tabMiei").hidden = true; $("tabCod").hidden = false;
@@ -11291,11 +11351,16 @@ function riparaColoriBloccati(){
 }
 function syncAvvio(poi){
   if(CLIENTE || !MEMORIA_OK){ SYNC.pronto = true; poi(); return; }
+  /* SER 11/11: un telefono rimasto con la memoria «incompleta» e poi collegato all'area di un rivenditore non arrivava
+     mai alla sua area (chiedeva sempre la password): l'area rivenditore non ha memoria condivisa da completare */
+  if(load("pavpro.sync.incompleta.v1", null) && syncCfg() && rivRicordato()) drop("pavpro.sync.incompleta.v1");
   if(load("pavpro.sync.incompleta.v1", null) && syncCfg()){
     /* una volta per sessione si riprova a prendere tutta la memoria (per esempio dopo aver liberato spazio) */
     SYNC.pronto = true; var giaProvato = false;
     try{ giaProvato = sessionStorage.getItem("pavpro.riprova") === "1"; sessionStorage.setItem("pavpro.riprova", "1"); }catch(e){}
-    if(!giaProvato){ syncChiama({azione:"statoGet"}, function(j){ if(j && j.ok && j.stato) syncApplica(j.stato, function(){ if(!SYNC.incompleta) syncRicarica(); else poi(); }); else { memoriaIncompleta([]); poi(); } }); return; }
+    if(!giaProvato){ syncChiama({azione:"statoGet"}, function(j){ if(j && j.ok && j.stato) syncApplica(j.stato, function(){ if(!SYNC.incompleta) syncRicarica(); else poi(); });
+      else if(j && (j.motivo === "non permesso" || j.motivo === "solo titolare")){ drop("pavpro.sync.incompleta.v1"); SYNC.pronto = false; syncAvvio(poi); }   // e' il codice di un rivenditore: si apre la sua area
+      else { memoriaIncompleta([]); poi(); } }); return; }
     memoriaIncompleta([]); poi(); return;
   }
   var m = syncMarca(); SYNC.quando = m.quando; SYNC.sporco = !!m.sporco; SYNC.impronta = load("pavpro.sync.impronta.v1", null);
@@ -11312,8 +11377,12 @@ function syncAvvioDopoBase(poi, giaRicaricato){
     syncDisegna(); poi();
   };
   syncChiama({azione:"statoQuando"}, function(j){
-    if(!j || !j.ok){ SYNC.errore = (j && j.motivo === "chiave") ? "parola d’ordine sbagliata" : (j && j.motivo === "azione") ? "il servizio è ancora alla versione 8: va aggiornato" : "servizio non raggiungibile"; fine(); return; }
+    if(!j || !j.ok){ SYNC.errore = (j && j.motivo === "chiave") ? "parola d’ordine sbagliata" : (j && j.motivo === "azione") ? "il servizio è ancora alla versione 8: va aggiornato" : "servizio non raggiungibile";
+      if(j && j.motivo === "chiave") rivDimentica();                 // il codice non vale piu': si torna a chiederlo
+      else if(rivRicordato()){ SYNC.attiva = false; SYNC.pronto = true; if(SYNC.poll){ clearInterval(SYNC.poll); SYNC.poll = null; } SYNC.rivFermo = true; rivAttesa(true); poi(); return; }   // area rivenditore senza rete: niente password, si riprova
+      fine(); return; }
     if(j.ruolo === "rivenditore"){ rivAvvia(j, poi); return; }
+    rivDimentica();
     SYNC.ruolo = j.ruolo || "titolare"; SYNC.nome = j.nome || "";
     if(typeof disegnaCollaboratoriCard === "function") disegnaCollaboratoriCard();
     if(j.rev && j.rev > APP_REV){ SYNC.pronto = true; copiaVecchia(j.rev); poi(); return; }   // copia vecchia: non salva niente
@@ -11372,7 +11441,24 @@ if(!CLIENTE){
   })();
 }
 if(!CLIENTE){
+  try{ if(rivRicordato()) rivAttesa(false); }catch(e){}
+  /* SER 11/11: il gestionale sul sito si aggiorna da solo. Se il telefono ha tenuto una pagina vecchia
+     (app-rev.json sul sito dice che ce n'e' una piu' nuova), la riprende subito, una volta sola. */
+  (function(){
+    if(!/^https?:$/.test(location.protocol) || !/^\d{14}$/.test(APP_REV)) return;
+    try{
+      fetch(new URL("../app-rev.json", location.href).href + "?t=" + Date.now(), {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(j){
+        var rev = String((j && j.rev) || "");
+        if(!/^\d{14}$/.test(rev) || !(rev > APP_REV)) return;
+        if(S.gestione && !RIV) return;                                 // stai lavorando: alla prossima apertura
+        if(sessionStorage.getItem("pavpro.rev.provata") === rev) return; // gia' provato: niente giri a vuoto
+        sessionStorage.setItem("pavpro.rev.provata", rev);
+        location.replace(location.pathname + "?v=" + rev + location.hash);
+      }).catch(function(){});
+    }catch(e){}
+  })();
   archivioCarica(function(){ syncAvvio(function(){
+    setTimeout(function(){ try{ if(RIV && RIV.pronto && !S.gestione && syncCfg()) entraInGestione(); }catch(e){} }, 60);   // il rivenditore entra comunque nella sua area
     agganciaSchedeDiFabbrica();
     var tzVia = togliGhiainoTerrazzo();
     var tz = aggiungiGhiainoTerrazzo();
@@ -11405,7 +11491,7 @@ if(!CLIENTE){
       if(vs && vs.y) setTimeout(function(){ window.scrollTo(0, vs.y); }, 200);
     } } }catch(e){}
     /* SER 11/11: il rivenditore scrive il codice solo la prima volta; poi l'app si apre gia' nella sua area, senza password */
-    try{ if(RIV && !S.gestione && syncCfg()) entraInGestione(); }catch(e){}
+    try{ if(RIV && RIV.pronto && !S.gestione && syncCfg()) entraInGestione(); }catch(e){}
     try{ if(sessionStorage.getItem("pavpro.tolto") === "1"){ sessionStorage.removeItem("pavpro.tolto");
       var dt0 = document.createElement("div"); dt0.className = "card"; dt0.style.borderColor = "#b3261e";
       dt0.innerHTML = "<h3>Accesso al gestionale tolto</h3><p class=\"corpo\">Il codice di questo dispositivo \u00e8 stato bloccato da Design Systems: i dati del gestionale sono stati cancellati da qui.</p>";
