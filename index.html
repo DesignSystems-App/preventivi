@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261111132751";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261111140607";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -7065,7 +7065,7 @@ function mandaOrdinePdf(via, m){
     if(errore){ m.className = "msg err"; m.textContent = errore; return; }
     var og = ordGestAttivo() ? ORD_GEST : null;
     ORD_CORRENTE = {numero:numero, quando:new Date().toISOString(), dalServizio:dalServizio, chiave:chiave||"", sostituisce: og ? (og.sostituisce || "") : (ORD_MODIFICA ? ORD_MODIFICA.numero : ""),
-                    gest: og ? {cliente:og.nome, chi:chiOrdGest()} : null};
+                    gest: og ? {cliente:og.nome, chi:chiOrdGest(), cliId:og.cliId || ""} : null};
     mandaOrdinePdf2(via, m);
     if(og){ ORD_GEST = null; drop("pavpro.ordgest.v1"); disegnaOrdGest(); setTimeout(function(){ ordGestCarica(); }, 3000); return; }
     if(ORD_MODIFICA){
@@ -7099,7 +7099,12 @@ function mandaOrdinePdf2(via, m){
     disegnaMieiOrdini();
   });
   if(soloServizio){ m.className = "msg"; m.textContent = T("Invio l\u2019ordine\u2026"); return; }
-  var lk = linkPdfOrdine(), intest = (ORD_CORRENTE.sostituisce ? T("MODIFICA") + " \u2014 " : "") + T("Ordine n.") + " " + ORD_CORRENTE.numero + " " + T("di") + " " + (S.rif || "cliente") + " " + T("per") + " " + (AZIENDA.nome || "Design Systems")
+  var perChi = "";
+  try{
+    if(!S.gestione && LINK_CLI && LINK_CLI.attivato && numeroWa(LINK_CLI.rivWa)) perChi = String(LINK_CLI.rivNome || "").trim();      // app del cliente di un rivenditore
+    else if(ORD_CORRENTE.gest && ORD_CORRENTE.gest.cliId) perChi = rivenditoreDiCliente(ORD_CORRENTE.gest.cliId);                   // ordine inserito dal gestionale per un cliente di un rivenditore
+  }catch(e){ perChi = ""; }
+  var lk = linkPdfOrdine(), intest = (ORD_CORRENTE.sostituisce ? T("MODIFICA") + " \u2014 " : "") + T("Ordine n.") + " " + ORD_CORRENTE.numero + " " + T("di") + " " + (S.rif || "cliente") + " " + T("per") + " " + (perChi || AZIENDA.nome || "Design Systems")
     + (ORD_CORRENTE.sostituisce ? " (" + T("sostituisce l\u2019ordine n.") + " " + ORD_CORRENTE.sostituisce + ")" : "")
     + (ORD_CORRENTE.gest ? " \u2014 inserito da " + ORD_CORRENTE.gest.chi : "");
   /* il messaggio breve per WhatsApp: col link al PDF firmato quando il servizio c'e' */
@@ -9509,7 +9514,7 @@ $("ogElenco").addEventListener("click", function(e){
   if(t.hasAttribute("data-ogwa")){
     var o = OG.ordini.find(function(x){ return x.numero === t.getAttribute("data-ogwa"); }); if(!o) return;
     var a = attImpostazioni(), lk = (o.chiave && /^https?:\/\//i.test(a.url || "")) ? a.url.replace(/\/+$/, "") + "/o/" + o.numero + "/" + o.chiave : "";
-    apriWhatsApp(numeroWa(o.cliente.tel), "Ciao, ecco il tuo ordine n. " + o.numero + " con " + (AZIENDA.nome || "Design Systems") + (o.sistema ? "\n" + o.sistema : "") + (o.totale ? " · totale " + E(Number(o.totale)) : "") + (lk ? "\nPDF: " + lk : ""));
+    apriWhatsApp(numeroWa(o.cliente.tel), "Ciao, ecco il tuo ordine n. " + o.numero + " con " + (rivenditoreDiOrdine(o) || AZIENDA.nome || "Design Systems") + (o.sistema ? "\n" + o.sistema : "") + (o.totale ? " · totale " + E(Number(o.totale)) : "") + (lk ? "\nPDF: " + lk : ""));
     return;
   }
   var nm = t.getAttribute("data-ogmod");
@@ -9695,10 +9700,25 @@ function numeriDaInoltrare(o){
   var nostro = numeroWa(AZIENDA.wa), l = (o && o.dest && o.dest.wa) ? o.dest.wa : [];
   return l.map(numeroWa).filter(function(n, i, a){ return n && n !== nostro && a.indexOf(n) === i; });
 }
+/* SER 11/11: negli ordini dei clienti di un rivenditore i messaggi dicono «per (nome del rivenditore)», non «per Design Systems» */
+function rivenditoreDiCliente(id){
+  if(RIV) return String(RIV.io.nome || RIV.nome || "").trim();
+  var c = id ? clienti.find(function(x){ return x.id === id; }) : null;
+  var rv = (c && c.rivDi) ? clienti.find(function(x){ return x.id === c.rivDi; }) : null;
+  return String((rv && rv.nome) || "").trim();
+}
+/* se la scheda del cliente non c'e' piu' (eliminato), il rivenditore si riconosce dal suo numero fra i destinatari dell'ordine */
+function rivenditoreDiOrdine(o){
+  var n = rivenditoreDiCliente(o && o.id); if(n) return n;
+  var nostro = numeroWa(AZIENDA.wa), wa = ((o && o.dest && o.dest.wa) || []).map(numeroWa).filter(function(x){ return x && x !== nostro; });
+  if(!wa.length) return "";
+  var rv = clienti.find(function(x){ return x.riv && wa.indexOf(numeroWa(numeroWaCliente(x.tel))) >= 0; });
+  return String((rv && rv.nome) || "").trim();
+}
 function inoltriFatti(){ var v = load("pavpro.ordini.inoltrati.v1", {}); return (v && typeof v === "object") ? v : {}; }
 function testoInoltro(o){
   var a = attImpostazioni(), lk = (o.chiave && /^https?:\/\//i.test(a.url||"")) ? a.url.replace(/\/+$/,"") + "/o/" + o.numero + "/" + o.chiave : "";
-  return "Ordine n. " + o.numero + " di " + ((o.cliente && o.cliente.nome) || "cliente") + " per " + (AZIENDA.nome || "Design Systems")
+  return "Ordine n. " + o.numero + " di " + ((o.cliente && o.cliente.nome) || "cliente") + " per " + (rivenditoreDiOrdine(o) || AZIENDA.nome || "Design Systems")
     + (o.sistema ? "\n" + o.sistema : "") + (o.mq ? " \u00b7 " + N(o.mq) + " m\u00b2" : "") + (o.totale ? " \u00b7 totale " + E(Number(o.totale)) : "")
     + (lk ? "\nPDF firmato: " + lk : "");
 }
