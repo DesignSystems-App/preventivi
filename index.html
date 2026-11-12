@@ -844,7 +844,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261111140607";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261112113154";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -958,12 +958,25 @@ function raggruppa(s){ var out=[]; for(var i=0;i<s.length;i+=4) out.push(s.subst
 function pulisci(s){ return String(s||"").toUpperCase().replace(/[^0-9A-Z]/g,"").replace(/^PVP/,"")
   .replace(/O/g,"0").replace(/I/g,"1"); }
 
+/* SER 12/11: sconti con la virgola. Il codice di versione 2 porta solo numeri interi: quando almeno uno sconto ha
+   i decimali si usa la versione 3, che li scrive in centesimi (tre caratteri). Senza decimali il codice resta
+   quello di sempre, identico carattere per carattere: i codici e i link gia' consegnati non cambiano. */
+function centesimi(v){ return Math.round(Number(v || 0) * 100); }
 function creaCodice(base, eccezioni, scadenzaISO, eccProd){
   eccProd = eccProd || [];
-  var corpo = "2" + e2(base) + e1(eccezioni.length);
-  for(var i=0;i<eccezioni.length;i++){ corpo += e1(eccezioni[i].idx) + e2(eccezioni[i].val); }
+  var conVirgola = centesimi(base) % 100 !== 0 || eccezioni.some(function(x){ return centesimi(x.val) % 100 !== 0; }) || eccProd.some(function(x){ return centesimi(x.val) % 100 !== 0; });
+  var corpo, i, j;
+  if(conVirgola){
+    corpo = "3" + e3(centesimi(base)) + e1(eccezioni.length);
+    for(i=0;i<eccezioni.length;i++){ corpo += e1(eccezioni[i].idx) + e3(centesimi(eccezioni[i].val)); }
+    corpo += e1(eccProd.length);
+    for(j=0;j<eccProd.length;j++){ corpo += e2(eccProd[j].idx) + e3(centesimi(eccProd[j].val)); }
+  } else {
+  corpo = "2" + e2(base) + e1(eccezioni.length);
+  for(i=0;i<eccezioni.length;i++){ corpo += e1(eccezioni[i].idx) + e2(eccezioni[i].val); }
   corpo += e1(eccProd.length);
-  for(var j=0;j<eccProd.length;j++){ corpo += e2(eccProd[j].idx) + e2(eccProd[j].val); }
+  for(j=0;j<eccProd.length;j++){ corpo += e2(eccProd[j].idx) + e2(eccProd[j].val); }
+  }
   var gg = 0;
   if(scadenzaISO){
     var d = new Date(scadenzaISO+"T00:00:00Z").getTime();
@@ -979,25 +992,26 @@ function leggiCodice(raw){
   var corpo = s.slice(0,-2), chk = s.slice(-2);
   if(firma(corpo) !== chk) return {ok:false, err:"Codice non valido: controlla di averlo copiato per intero."};
   var ver = corpo.charAt(0);
-  if(ver !== "1" && ver !== "2") return {ok:false, err:"Codice di una versione che questa app non conosce."};
+  if(ver !== "1" && ver !== "2" && ver !== "3") return {ok:false, err:"Codice di una versione che questa app non conosce."};
   var p = 1;
-  var base = d2(corpo.substr(p,2)); p+=2;
+  var v3 = ver === "3", lv = v3 ? 3 : 2, dv = function(t){ var x = v3 ? d3(t) : d2(t); return (x < 0 || !v3) ? x : x / 100; };   // versione 3: sconti in centesimi
+  var base = dv(corpo.substr(p,lv)); p+=lv;
   var n = d1(corpo.charAt(p)); p+=1;
   if(base<0 || n<0) return {ok:false, err:"Codice non leggibile."};
   var ecc = [];
   for(var i=0;i<n;i++){
     var idx = d1(corpo.charAt(p)); p+=1;
-    var val = d2(corpo.substr(p,2)); p+=2;
+    var val = dv(corpo.substr(p,lv)); p+=lv;
     if(idx<0 || val<0) return {ok:false, err:"Codice non leggibile."};
     ecc.push({idx:idx, val:val});
   }
   var eccP = [];
-  if(ver === "2"){
+  if(ver === "2" || v3){
     var np = d1(corpo.charAt(p)); p+=1;
     if(np<0) return {ok:false, err:"Codice non leggibile."};
     for(var k=0;k<np;k++){
       var pi = d2(corpo.substr(p,2)); p+=2;
-      var pv = d2(corpo.substr(p,2)); p+=2;
+      var pv = dv(corpo.substr(p,lv)); p+=lv;
       if(pi<0 || pv<0) return {ok:false, err:"Codice non leggibile."};
       eccP.push({idx:pi, val:pv});
     }
@@ -5851,6 +5865,12 @@ function linkBreve(cli, poi){
     if(SERV_VER === null){ fetch(a.url.replace(/\/+$/,"") + "/").then(function(r){ return r.json(); }).then(function(j){ SERV_VER = Number(j && j.versione) || 0; }).catch(function(){ SERV_VER = 0; }).then(function(){ linkBreve(cli, poi); }); return; }
     poi(lungo); return;
   }
+  /* SER 12/11: fino alla versione 21.3 il servizio tiene solo 40 caratteri del codice: un codice piu' lungo
+     (tanti sconti per prodotto, o con la virgola) arriverebbe troncato. Si aspetta la 21.4. */
+  if(String(cli.code || "").length > 40 && !(SERV_VER >= 21.4)){
+    if(SERV_VER === null){ fetch(a.url.replace(/\/+$/,"") + "/").then(function(r){ return r.json(); }).then(function(j){ SERV_VER = Number(j && j.versione) || 0; }).catch(function(){ SERV_VER = 0; }).then(function(){ linkBreve(cli, poi); }); return; }
+    poi(lungo); return;
+  }
   if(LK_ATTESA[cli.id]){ LK_ATTESA[cli.id].push(poi); return; }            // richiesta gia' in corso
   if(LK_TENT[cli.id] && Date.now() - LK_TENT[cli.id] < 60000){ poi(lungo); return; }   // fallita da poco: niente martellate
   LK_TENT[cli.id] = Date.now(); LK_ATTESA[cli.id] = [poi];
@@ -7776,7 +7796,7 @@ function disegnaGenSconti(){
   if(!box.childElementCount){
     box.innerHTML = LISTINO_BASE.gruppi.map(function(g, i){
       return '<div><label class="l" for="gs'+i+'">'+esc(g.nome)+'</label>'
-           + '<input id="gs'+i+'" type="text" maxlength="6" autocomplete="off" placeholder="base" inputmode="decimal"></div>';
+           + '<input id="gs'+i+'" type="text" maxlength="7" autocomplete="off" placeholder="base" inputmode="decimal"></div>';
     }).join("");
   }
   var bp = $("genProdotti");
@@ -7791,7 +7811,7 @@ function disegnaGenSconti(){
     vis.push(nome);
     return '<div><label class="l" for="ps'+i+'">'+esc(nome)
          + (i >= PRODOTTI_BASE.length ? ' <span class="miotag">tuo</span>' : '') + '</label>'
-         + '<input id="ps'+i+'" type="text" maxlength="6" autocomplete="off" placeholder="\u2014" inputmode="decimal"></div>';
+         + '<input id="ps'+i+'" type="text" maxlength="7" autocomplete="off" placeholder="\u2014" inputmode="decimal"></div>';
   }).join("");
   var firma = vis.join("\u0001");
   if(bp.dataset.firma !== firma){
@@ -7822,7 +7842,7 @@ function leggiPercento(v){
   var piu = v.charAt(0) === "+";
   var n = Number(v.replace(/^[+\-]\s*/, ""));
   if(!isFinite(n) || n < 0 || !/^[+\-]?\s*[0-9.]+$/.test(v)) return {err:true};
-  return {ric:piu && n > 0, val:Math.round(n)};
+  return {ric:piu && n > 0, val:Math.round(n * 100) / 100};   /* SER 12/11: sconti e ricarichi anche con la virgola (due decimali): 60,52 */
 }
 function leggiModulo(){
   var conRiv = !!(RIV || $("genRivDi").value) && !$("genRiv").checked;
@@ -7902,21 +7922,22 @@ function scriviModulo(c){
   $("genDestWa").value = c && c.dest && c.dest.wa ? c.dest.wa.join("\n") : "";
   $("genDestMail").value = c && c.dest && c.dest.mail ? c.dest.mail.join("\n") : "";
   disegnaSuoiClienti(c ? c.id : null);
-  var conSegno = !!(c && !c.riv && (RIV || c.rivDi)), meno = function(v){ return (conSegno && Number(v) > 0) ? "-" + v : v; };
-  $("genBase").value = c ? (Number(c.ricarico) > 0 ? "+" + c.ricarico : meno(c.base)) : (RIV ? 0 : 20);     /* SER 10/11 sera: i clienti del rivenditore partono dal suo listino, senza sconto in piu' */
+  var vir = function(v){ return String(v).replace(".", ","); };
+  var conSegno = !!(c && !c.riv && (RIV || c.rivDi)), meno = function(v){ return (conSegno && Number(v) > 0) ? "-" + vir(v) : vir(v); };
+  $("genBase").value = c ? (Number(c.ricarico) > 0 ? "+" + vir(c.ricarico) : meno(c.base)) : (RIV ? 0 : 20);     /* SER 10/11 sera: i clienti del rivenditore partono dal suo listino, senza sconto in piu' */
   mostraRicarico();
   $("genScad").value = c && c.scad ? c.scad : "";
   for(var i=0;i<LISTINO_BASE.gruppi.length;i++){
     var el = $("gs"+i); if(!el) continue;
     var e = c && (c.ecc||[]).find(function(x){ return x.idx===i; });
     var er = c && (c.ricEcc||[]).find(function(x){ return x.idx===i; });
-    el.value = er ? "+" + er.val : (e ? meno(e.val) : "");
+    el.value = er ? "+" + vir(er.val) : (e ? meno(e.val) : "");
   }
   for(var j=0;j<PRODOTTI_TUTTI.length;j++){
     var ep = document.getElementById("ps"+j); if(!ep) continue;
     var p = c && (c.eccP||[]).find(function(x){ return x.idx===j; });
     var pr = c && (c.ricEccP||[]).find(function(x){ return x.idx===j; });
-    ep.value = pr ? "+" + pr.val : (p ? meno(p.val) : "");
+    ep.value = pr ? "+" + vir(pr.val) : (p ? meno(p.val) : "");
   }
   $("titoloCliente").textContent = c ? ("Modifica: "+(c.nome||"cliente senza nome")) : "Nuovo cliente";
   $("genOut").hidden = !(c && c.code);
