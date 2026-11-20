@@ -851,7 +851,7 @@ var ATT_PRECOMPILATO = null; /*__ATTPRE__*/  // {url, chiave} del servizio attiv
 var CARTELLA_TEL = ""; /*__CARTELLA_TEL__*/   // cartella del gestionale per il telefono sul sito (solo nel gestionale)
 var ATT_URL_BASE = "https://pavpro-attivazioni.soft-river-2817.workers.dev";
 /*__QRLIB__*/
-var APP_REV = "20261120185259";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
+var APP_REV = "20261120192441";              // data e ora in cui e' stata costruita questa copia (la mette build.py)
 var ICONE_B64 = {}; /*__ICONE__*/          // icona dell'app per la schermata Home (192 e 512 px), caricate da "Pubblica adesso"
 var MANIFEST_APP = { name:"Preventivi Pavimenti", short_name:"Preventivi", description:"Preventivi e ordini dei pavimenti Design Systems",
   display:"standalone", background_color:"#f9f5ec", theme_color:"#d9c094", lang:"it",
@@ -1648,6 +1648,7 @@ var sel = load(K.sel, null) || {};
 var VISTA_STESSA_APERTURA = (function(){ try{ var gia = sessionStorage.getItem("pavpro.aperta") === "1"; sessionStorage.setItem("pavpro.aperta", "1"); return gia; }catch(e){ return false; } })();
 var RIPRENDI_ORDINE = !!load("pavpro.ordmod.v1", null);
 var S = {
+  colV: sel.colV === 2 ? 2 : 1,     // 2 = scelte dei colori salvate con le regole del 20/11 (rivestimento indipendente dal pavimento)
   gruppo: sel.gruppo || listino.gruppi[0].id,
   variante: sel.variante || listino.gruppi[0].varianti[0].id,
   mq: typeof sel.mq==="number" ? sel.mq : 100,
@@ -1706,7 +1707,7 @@ var S = {
   if(mosso) try{ save(K.sel, S); }catch(e){}
 })();
 
-function salvaSel(){ save(K.sel, {gruppo:S.gruppo, variante:S.variante, mq:S.mq, mqRiv:S.mqRiv, realizza:S.realizza, rivDiverso:S.rivDiverso, scarto:S.scarto, scartoMio:!!S.scartoMio,
+function salvaSel(){ save(K.sel, {colV:S.colV, gruppo:S.gruppo, variante:S.variante, mq:S.mq, mqRiv:S.mqRiv, realizza:S.realizza, rivDiverso:S.rivDiverso, scarto:S.scarto, scartoMio:!!S.scartoMio,
   colore:S.colore, colsel:S.colsel, colq:S.colq, stencil:S.stencil, granulo:S.granulo, incluso:S.incluso, conf:S.conf, cons:S.cons, fin:S.fin, colgr:S.colgr, colpct:S.colpct, spessore:S.spessore, vista:S.vista, ricarico:S.ricarico,
   rif:S.rif, ditta:S.ditta, wa:S.wa, mail:S.mail, note:S.note, modo:S.modo, privacy:S.privacy||null}); }
 
@@ -3386,37 +3387,49 @@ function rivStessoColore(g){
   return realizzaDi(g) === "entrambi" && !(S.rivDiverso || {})[g.id];
 }
 /* SER 20/11: con «Pavimento e rivestimento» la tabella colori del rivestimento c'e' sempre, insieme a quella del
-   pavimento. Finche' sul rivestimento non si sceglie niente, vale il colore del pavimento; scelto un colore suo,
-   vale quello (ritoccandolo si toglie e torna quello del pavimento). La spunta «stesso colore» non serve piu'. */
+   pavimento, e i due colori sono indipendenti: il rivestimento ha un colore SOLO quando lo si sceglie nella sua
+   tabella (niente piu' colore preso da solo dal pavimento, niente spunta «stesso colore»). */
 function haColoreSuo(uid){
   var l = S.colsel[uid];
   return Array.isArray(l) ? l.length > 0 : !!S.colore[uid];
 }
-function coloreComePavimento(uid){
-  if(!/~riv$/.test(String(uid))) return null;
-  var o = RIV_CACHE[uid];
-  return (o && o.coloreDa && realizzaDi() === "entrambi" && !haColoreSuo(uid)) ? o.coloreDa : null;
-}
+function coloreComePavimento(uid){ return null; }
 /* il sistema di una riga, dal suo uid (anche "<uid>~riv") */
 function gruppoDiUid(uid){
   var base = String(uid).replace(/~riv$/, ""), out = null;
   (listino.gruppi || []).forEach(function(g){ (g.varianti || []).forEach(function(v){ (v.voci || []).forEach(function(c){ if(!out && c.uid === base) out = g; }); }); });
   return out;
 }
-/* le scelte salvate prima del 20/11: con la spunta «stesso colore» messa, un colore rimasto sulle righe del
-   rivestimento non contava. Si toglie, cosi' quegli ordini e quelle scelte restano identici a prima. */
-var RIV_PULITO = false;
+/* Le scelte salvate prima del 20/11 (S.colV diverso da 2), una volta sola:
+   - un ORDINE gia' mandato che si riapre per modificarlo resta identico: dove valeva «stesso colore del pavimento»
+     il colore del pavimento si scrive sul rivestimento;
+   - nelle scelte rimaste nell'app, i colori del rivestimento si tolgono: si scelgono adesso, nella sua tabella. */
+var RIV_PULITO = false, RIV_ORDINE_VECCHIO = RIPRENDI_ORDINE;
 function pulisciColoriRiv(){
   RIV_PULITO = true;
-  var diversi = S.rivDiverso || {};
-  [S.colsel, S.colore, S.colq, S.colpct, S.colgr].forEach(function(m){
-    if(!m) return;
-    Object.keys(m).forEach(function(u){
-      if(!/~riv$/.test(u)) return;
-      var g = gruppoDiUid(u);
-      if(g && !diversi[g.id]) delete m[u];
+  if(S.colV === 2) return;
+  if(!S.rivDiverso) S.rivDiverso = {};
+  var mappe = [S.colsel, S.colore, S.colq, S.colpct, S.colgr];
+  if(RIV_ORDINE_VECCHIO){
+    (listino.gruppi || []).forEach(function(g){
+      if(!(g.rivestimento && g.rivestimento.regole) || (S.realizza || {})[g.id] !== "entrambi" || S.rivDiverso[g.id]) return;
+      (g.varianti || []).forEach(function(v){ (v.voci || []).forEach(function(c){
+        var r = regolaRiv(g, c); if(!r) return;
+        var da = (r.coloriDa && !(c.colori || []).length) ? (v.voci || []).find(function(z){ return chiaveNome(z.nome) === chiaveNome(r.coloriDa); }) : ((c.colori || []).length ? c : null);
+        var u = c.uid + "~riv";
+        mappe.forEach(function(m){ if(m) delete m[u]; });
+        if(!da) return;
+        var primo = Array.isArray(S.colsel[da.uid]) ? S.colsel[da.uid][0] : S.colore[da.uid];
+        if(primo){ S.colsel[u] = [primo]; S.colore[u] = primo; S.rivDiverso[g.id] = true; }
+      }); });
     });
-  });
+  } else {
+    mappe.forEach(function(m){ if(m) Object.keys(m).forEach(function(u){ if(/~riv$/.test(u)) delete m[u]; }); });
+    S.rivDiverso = {};
+  }
+  RIV_ORDINE_VECCHIO = false;
+  S.colV = 2;
+  try{ salvaSel(); }catch(e){}
 }
 /* "80 m²", "30 m² per il rivestimento", "80 m² + 30 m² per il rivestimento" */
 /* in gestione: spunta e consumo del rivestimento si scrivono nelle regole del sistema (valgono su tutti i sottofondi) */
@@ -9540,7 +9553,7 @@ function disegnaOrdGest(){
 }
 /* applica le scelte salvate di un ordine (per modificarlo) */
 function ogApplicaSel(sel){
-  RIV_PULITO = false;
+  RIV_PULITO = false; RIV_ORDINE_VECCHIO = true; S.colV = (sel.colV === 2) ? 2 : 1;
   ["realizza","rivDiverso","colore","colsel","colq","stencil","granulo","conf","fin","colgr","colpct","cons","spessore","incluso"].forEach(function(k){
     S[k] = (sel[k] && typeof sel[k] === "object") ? clone(sel[k]) : {};
   });
@@ -9560,6 +9573,7 @@ function ogInizia(c, sost, sel){
   S.pz = {}; S.modifica = null;
   if(sel) ogApplicaSel(sel);
   else {
+    S.colV = 2;
     ["realizza","rivDiverso","colore","colsel","colq","stencil","granulo","conf","fin","colgr","colpct","cons","spessore","incluso"].forEach(function(k){ S[k] = {}; });
     S.note = ""; S.privacy = null;
   }
